@@ -32,6 +32,7 @@ internal static class ElementLooks
     internal static bool IsExtra(HudStyle style, int id) =>
         ((id == HudElementPositions.FuelTape || id == HudElementPositions.ThrottleTape) && style != HudStyle.Arcade)
         || (id == HudElementPositions.WeaponWheel)
+        || (id == HudElementPositions.MissileArcs && style != HudStyle.Arcade)
         || (id == HudElementPositions.Bars && style != HudStyle.Wingman && style != HudStyle.Native && style != HudStyles.Plus)
         || ((id == HudElementPositions.DataBlock || id == HudElementPositions.TopBar)
             && style != HudStyle.Thunder && style != HudStyle.Native && style != HudStyles.Plus);

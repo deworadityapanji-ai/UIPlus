@@ -187,7 +187,7 @@ internal static partial class ArcadeHud
     private static float _stripTrim;
 
     // The RWR scope was moved away from its place in the strip.
-    private static bool RwrAway => RwrCompat.Present && HudElementPositions.Moved(HudElementPositions.Rwr);
+    private static bool RwrAway => RwrCompat.Active && HudElementPositions.Moved(HudElementPositions.Rwr);
 
     // ---- map docked to the strip's left end ----------------------------------------------------
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -42,8 +43,12 @@ internal static class ReloadsCompat
         return _forLocalHud != null;
     }
 
+    /// <summary>Hooked in: its reload state was found.</summary>
+    internal static bool Working => _resolved && _forLocalHud != null;
+
     private static object State()
     {
+        if (Integrations.Reloads != null && !Integrations.Reloads.On) return null;
         if (_stateFrame == Time.frameCount) return _state;
         _stateFrame = Time.frameCount;
         _state = null;
@@ -127,7 +132,7 @@ internal static class ReloadsCompat
 // the mod's own update, and handed back untouched when not needed. Used with the author's permission.
 internal static class RwrCompat
 {
-    private const string Guid = "pavehog727.traditionalrwr";
+    internal const string Guid = "pavehog727.traditionalrwr";
     // Bottom-left of the scope in Arcade, in 1080p reference pixels: right of the map, same bottom.
     private static readonly Vector2 ArcadeScopeCorner = new(388f, 65f);
 
@@ -139,6 +144,10 @@ internal static class RwrCompat
     private static Color? _savedTheme;
 
     internal static bool Present => Chainloader.PluginInfos.ContainsKey(Guid);
+    /// <summary>Installed and switched on in UI Plus's compatibility settings.</summary>
+    internal static bool Active => Present && (Integrations.Rwr == null || Integrations.Rwr.On);
+    /// <summary>Hooked in: its controller was found.</summary>
+    internal static bool Working => _type != null && _instance != null;
 
     private static bool Resolve()
     {
@@ -198,6 +207,7 @@ internal static class RwrCompat
     // Called every LateUpdate (after the RWR mod's own Update has placed and coloured its scope).
     internal static void Tick(bool chase, bool arcade, Color hudColour)
     {
+        chase &= Integrations.Rwr == null || Integrations.Rwr.On;   // off: leave the RWR as its mod draws it
         if (!Resolve()) return;
         if (_instance == null && Time.unscaledTime > _nextFind)
         {
@@ -474,6 +484,17 @@ internal static class RwrCompat
 
     internal static bool TryGetAlertsRect(out Rect rect) => RectOf(Panel, out rect);
 
+    /// <summary>The RWR mod's own canvas (for Hide HUD), or null.</summary>
+    internal static Canvas ScopeCanvas
+    {
+        get
+        {
+            RectTransform scope = Scope;
+            Canvas canvas = scope != null ? scope.GetComponentInParent<Canvas>() : null;
+            return canvas != null ? canvas.rootCanvas : null;
+        }
+    }
+
     private static bool RectOf(RectTransform target, out Rect rect)
     {
         rect = default;
@@ -491,7 +512,8 @@ internal static class RwrCompat
 // and put back as it was when Thunder ends or the game closes.
 internal static class NoAutopilotCompat
 {
-    private const string Guid = "com.qwerty1423.NOAutopilot";
+    internal const string Guid = "com.qwerty1423.NOAutopilot";
+    internal static bool Working => Resolve();
     private static ConfigEntry<bool> _overlay;
     private static bool _resolved, _hiding, _was;
 
@@ -507,6 +529,7 @@ internal static class NoAutopilotCompat
 
     internal static void SetHidden(bool hide)
     {
+        hide &= Integrations.NoAutopilot == null || Integrations.NoAutopilot.On;
         if (hide == _hiding || !Resolve()) return;
         ConfigFile file = _overlay.ConfigFile;
         bool save = file.SaveOnConfigSet;
@@ -519,4 +542,76 @@ internal static class NoAutopilotCompat
         finally { file.SaveOnConfigSet = save; }
         _hiding = hide;
     }
+}
+
+// Optional integration with "NO Missile Indicators" (baanish, MIT): its indicator style follows the
+// HUD style — Project Wingman's 3D sphere in Wingman, its flashing arrows in Arcade, Dashboard and
+// Thunder; the Native style leaves the player's own choice alone. Changed in memory only (its
+// settings file is not rewritten), and put back when UI Plus stops matching or unloads.
+internal static class MissileIndicatorsCompat
+{
+    internal const string Guid = "com.baanish.nuclearoption.missileindicators";
+    internal static bool Working => _style != null;
+    private static bool _tried;
+    private static ConfigEntryBase _style;
+    private static object _original;
+    private static string _applied;
+    private static ConfigEntryBase _arrows;
+    private static object _arrowsOriginal;
+    private static bool _arrowsOff;
+
+    internal static void Tick(HudStyle style, bool match)
+    {
+        if (!_tried)
+        {
+            _tried = true;
+            if (Chainloader.PluginInfos.TryGetValue(Guid, out var info) && info.Instance is BaseUnityPlugin plugin)
+            {
+                var definition = new ConfigDefinition("Missile Arrows", "Style");
+                if (plugin.Config.ContainsKey(definition)) _style = plugin.Config[definition];
+                var show = new ConfigDefinition("Missile Arrows", "ShowArrows");
+                if (plugin.Config.ContainsKey(show)) _arrows = plugin.Config[show];
+                Plugin.Logger.LogInfo(_style != null
+                    ? "NO Missile Indicators found: its style follows the HUD style."
+                    : "NO Missile Indicators found, but its Style setting was not: styles are not matched.");
+            }
+        }
+        // While UI Plus's own missile arcs show, the mod's arrows step aside (no doubled warnings).
+        bool arcs = match && ArcadeHud.MissileArcsShowing;
+        if (_arrows != null && _arrows.SettingType == typeof(bool) && arcs != _arrowsOff)
+        {
+            if (arcs) { _arrowsOriginal = _arrows.BoxedValue; Set(_arrows, false); }
+            else if (_arrowsOriginal != null) Set(_arrows, _arrowsOriginal);
+            _arrowsOff = arcs;
+        }
+        if (_style == null || !_style.SettingType.IsEnum) return;
+        string want = match && style != HudStyle.Native && style != HudStyles.Plus
+            ? (style == HudStyle.Wingman ? "ProjectWingman" : "Arrows") : null;
+        if (want == _applied) return;
+        if (want == null) { Restore(); return; }
+        if (!Enum.IsDefined(_style.SettingType, want)) return;
+        if (_applied == null) _original = _style.BoxedValue;
+        Set(_style, Enum.Parse(_style.SettingType, want));
+        _applied = want;
+    }
+
+    private static void Set(ConfigEntryBase entry, object value)
+    {
+        ConfigFile file = entry.ConfigFile;
+        bool save = file.SaveOnConfigSet;
+        file.SaveOnConfigSet = false;   // memory only: their settings file keeps the player's choice
+        try { entry.BoxedValue = value; }
+        finally { file.SaveOnConfigSet = save; }
+    }
+
+    private static void Restore()
+    {
+        if (_style != null && _applied != null && _original != null) Set(_style, _original);
+        if (_arrows != null && _arrowsOff && _arrowsOriginal != null) Set(_arrows, _arrowsOriginal);
+        _arrowsOff = false;
+        _applied = null;
+        _original = null;
+    }
+
+    internal static void Dispose() => Restore();
 }

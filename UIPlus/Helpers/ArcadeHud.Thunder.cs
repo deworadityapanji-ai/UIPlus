@@ -341,6 +341,7 @@ internal static partial class ArcadeHud
     private static void SyncNeutralQolFuel(bool hide)
     {
         NoAutopilotCompat.SetHidden(hide);
+        hide &= Integrations.NeutralQol == null || Integrations.NeutralQol.On;
         if (hide && _qolFuelLine == null && Time.unscaledTime >= _nextQolLook)
         {
             _nextQolLook = Time.unscaledTime + 2f;

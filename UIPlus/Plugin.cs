@@ -37,11 +37,16 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> TargetingScreenYPercent;
     public static ConfigEntry<float> TargetingScreenWidthPercent;
     public static ConfigEntry<bool> KillCallouts;
+    public static ConfigEntry<bool> MatchMissileIndicators;
+    public static ConfigEntry<bool> FixTargetArrow;
+    internal static ConfigEntry<TextHalo.Strength> TextContrast;
 
     // The action keeps its old ArcadeCam name: its id comes from the name, and the id is what
     // Rewired saves the player's binding under, so an existing binding keeps working.
     public const string ACTION_MAP_ZOOM = "ArcadeCam::MapZoom";
     public static int MapZoomActionId = -1;
+    public const string ACTION_HIDE_HUD = "UIPlus::HideHud";
+    public static int HideHudActionId = -1;
 
     private void Awake()
     {
@@ -77,6 +82,12 @@ public class Plugin : BaseUnityPlugin
 
         KillCallouts = Config.Bind("HUD Layout", "KillCallouts", true,
             "Arcade HUD style: show DESTROYED for your kills, HIT when your missile damages its target, MISS when it does not. Needs ArcadeCam, which judges the hits.");
+        Integrations.Bind(Config);
+        MatchMissileIndicators = Integrations.MissileIndicators.Enabled;
+        FixTargetArrow = Config.Bind("Compatibility", "FixTargetArrow", true,
+            "Fix a game bug: the HUD's target arrow (and other off-screen markers) pointed to the wrong side when the target was behind you (more than 90 degrees off the nose). Off restores the game's own behaviour.");
+        TextContrast = Config.Bind("HUD Layout", "TextContrast", TextHalo.Strength.Soft,
+            "High contrast: a soft dark halo behind the HUD text so it stays readable over bright sky and clouds, without changing its look. Soft is barely visible on a dark background; Strong for very bright scenes. Arcade, Wingman and Thunder (Dashboard's strip is already dark).");
         HudViews.Bind(Config);
         HudLayoutEditor.Bind(Config, SectionChaseHud);
         HudElementPositions.Bind(Config);
@@ -118,6 +129,7 @@ public class Plugin : BaseUnityPlugin
     private void Update()
     {
         HudLayoutEditor.Update();
+        HudHide.Poll();
         ArcadeCamBridge.TryConnect();
     }
 
@@ -127,6 +139,7 @@ public class Plugin : BaseUnityPlugin
     {
         HudLayoutEditor.Close(false);
         ArcadeCamBridge.Disconnect();
+        HudHide.Reset();
         if (_hudUpdater != null) Destroy(_hudUpdater);
         HudElements.Dispose();
         TargetingScreenOverlay.Dispose();

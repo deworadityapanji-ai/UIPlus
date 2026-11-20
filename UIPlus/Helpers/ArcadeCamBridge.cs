@@ -25,7 +25,7 @@ internal static class ArcadeCamBridge
     {
         get
         {
-            try { return _weaponCameraShowing != null && _weaponCameraShowing(); }
+            try { return _weaponCameraShowing != null && (Integrations.ArcadeCam == null || Integrations.ArcadeCam.On) && _weaponCameraShowing(); }
             catch { return false; }
         }
     }
@@ -67,6 +67,6 @@ internal static class ArcadeCamBridge
 
     private static void OnCallout(string title, string name, bool alert)
     {
-        if (Plugin.KillCallouts.Value) ArcadeHud.ShowCallout(title, name, alert);
+        if (Plugin.KillCallouts.Value && (Integrations.ArcadeCam == null || Integrations.ArcadeCam.On)) ArcadeHud.ShowCallout(title, name, alert);
     }
 }

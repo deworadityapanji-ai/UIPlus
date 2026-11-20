@@ -40,6 +40,6 @@ internal static class HudViews
     /// where the cockpit's own screens already show that feed.
     /// </summary>
     internal static bool TargetingAllowed(CameraStateManager cam) =>
-        Showing(cam) && ChaseInput.IsAllowed(cam)
+        Showing(cam) && !HudHide.Hidden && ChaseInput.IsAllowed(cam)
         && !(IsCockpit(cam) && !ArcadeHud.CustomHudActive);
 }

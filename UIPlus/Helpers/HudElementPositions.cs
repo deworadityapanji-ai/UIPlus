@@ -11,9 +11,9 @@ namespace UIPlus.Helpers;
 internal static class HudElementPositions
 {
     internal const int Map = 1, Weapon = 2, LeftInstruments = 3, RightInstruments = 4,
-        Compass = 5, Damage = 6, Waterline = 7, SpeedBlock = 8, AltBlock = 9, WeaponList = 10, StatusRow = 11, VectorGauges = 12, Caution = 13, PullUp = 14, Rwr = 15, Subtitle = 16, Banner = 17, Bars = 18, Strip = 19, TopBar = 20, DataBlock = 21, Ring = 22, TargetScreen = 23, KillFeed = 24, RwrAlerts = 25, FuelTape = 26, ThrottleTape = 27, WeaponWheel = 28, Count = 29;
+        Compass = 5, Damage = 6, Waterline = 7, SpeedBlock = 8, AltBlock = 9, WeaponList = 10, StatusRow = 11, VectorGauges = 12, Caution = 13, PullUp = 14, Rwr = 15, Subtitle = 16, Banner = 17, Bars = 18, Strip = 19, TopBar = 20, DataBlock = 21, Ring = 22, TargetScreen = 23, KillFeed = 24, RwrAlerts = 25, FuelTape = 26, ThrottleTape = 27, WeaponWheel = 28, MissileArcs = 29, Count = 30;
     private static readonly string[] Names = { "", "Map", "Weapon", "LeftInstruments", "RightInstruments",
-        "Compass", "Damage", "Waterline", "SpeedBlock", "AltBlock", "WeaponList", "StatusRow", "VectorGauges", "Caution", "PullUp", "Rwr", "Subtitle", "Banner", "Bars", "Strip", "TopBar", "DataBlock", "WeaponRing", "TargetingScreen", "KillFeed", "RwrAlerts", "FuelTape", "ThrottleTape", "WeaponWheel" };
+        "Compass", "Damage", "Waterline", "SpeedBlock", "AltBlock", "WeaponList", "StatusRow", "VectorGauges", "Caution", "PullUp", "Rwr", "Subtitle", "Banner", "Bars", "Strip", "TopBar", "DataBlock", "WeaponRing", "TargetingScreen", "KillFeed", "RwrAlerts", "FuelTape", "ThrottleTape", "WeaponWheel", "MissileArcs" };
 
     internal static ConfigEntry<HudStyle> Style;
     internal static ConfigEntry<bool> PlainBackingWhenMoved;
@@ -47,13 +47,13 @@ internal static class HudElementPositions
     internal static bool Valid(int id) => Plus
         // Plus: every native piece stays (and can be moved), plus its own additions.
         ? id <= Waterline || id == Caution || id == PullUp || id == Subtitle || id == Banner || id == VectorGauges
-          || id == TopBar || id == Ring || id == KillFeed || ((id == Rwr || id == RwrAlerts) && RwrCompat.Present)
+          || id == TopBar || id == Ring || id == KillFeed || ((id == Rwr || id == RwrAlerts) && RwrCompat.Active)
         : Arcade
-        ? id != LeftInstruments && id != RightInstruments && id != Weapon && id != Ring && ((id != Rwr && id != RwrAlerts) || RwrCompat.Present)
+        ? id != LeftInstruments && id != RightInstruments && id != Weapon && id != Ring && ((id != Rwr && id != RwrAlerts) || RwrCompat.Active)
           && (id != Strip || Style.Value == HudStyle.Dashboard)
           // The star wheel cannot be added while Wingman's cluster (which has its own star) shows.
           && (id != WeaponWheel || !ElementLooks.WingmanClusterIn(Style.Value))
-        : id <= Waterline || ((id == Rwr || id == RwrAlerts) && RwrCompat.Present);
+        : id <= Waterline || ((id == Rwr || id == RwrAlerts) && RwrCompat.Active);
 
     // The game's panel art is slanted to fit one screen corner. When a panel is moved, a plain
     // rectangle sized to its real content replaces it; the original art is restored afterwards.

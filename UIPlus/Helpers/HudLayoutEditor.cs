@@ -50,7 +50,7 @@ internal static class HudLayoutEditor
         "RIGHT INSTRUMENTS", "COMPASS", "DAMAGE (shown when hit)", "WATERLINE",
         "SPEED", "ALTITUDE", "WEAPON LIST", "STATUS TAGS", "GAUGE TRAY", "CAUTION / MISSILE", "PULL UP / STALL", "RWR",
         "SUBTITLE", "MISSION UPDATE", "THROTTLE / FUEL", "INSTRUMENT STRIP",
-        "FACTION / ESCALATION", "DATA BLOCK", "WEAPON RING", "TARGETING SCREEN", "KILL FEED", "RWR ALERTS", "FUEL TAPE", "THROTTLE TAPE", "WEAPON WHEEL" };
+        "FACTION / ESCALATION", "DATA BLOCK", "WEAPON RING", "TARGETING SCREEN", "KILL FEED", "RWR ALERTS", "FUEL TAPE", "THROTTLE TAPE", "WEAPON WHEEL", "MISSILE ARCS" };
     private static float _startX, _startY;
     private static int _selected;
     private static Vector2 _dragStart;

@@ -34,12 +34,14 @@ internal sealed class SettingsPage : MonoBehaviour
         (HudViews.Section, "ShowInCockpit", "Cockpit view"),
         (HudViews.Section, "ShowInOrbit", "Orbit camera"),
         (null, null, "HUD ELEMENTS"),
+        ("HUD Layout", "TextContrast", "Text contrast (dark halo)"),
         ("HUD Layout", "KillCallouts", "Hit / miss / destroyed callouts"),
         ("HUD Layout", "KillFeed", "Kill feed"),
         ("HUD Layout", "WeaponPopup", "Weapon pop-up"),
         ("Targeting Screen", "TargetingScreenEnabled", "Targeting screen"),
         ("Minimap", "Zoom", "Minimap zoom"),
         ("HUD Layout", "PlainBackingWhenMoved", "Plain map backing when moved"),
+        ("Compatibility", "FixTargetArrow", "Fix the target arrow for targets behind you"),
         (null, null, "STYLE OPTIONS"),
         ("HUD Layout", "ArcadeTargetingScreen", "Arcade: targeting screen"),
         ("HUD Layout", "ArcadeWeaponIconRotation", "Arcade: weapon icon rotation"),
@@ -47,6 +49,8 @@ internal sealed class SettingsPage : MonoBehaviour
         ("HUD Layout", "WingmanSlant", "Wingman: lean the side panels"),
         ("HUD Layout", "DashboardDockMap", "Dashboard: dock the map to the strip"),
         ("HUD Layout", "ThunderFactionColours", "Thunder: faction colours"),
+        ("HUD Layout", "ThunderFactionPalette#Boscali", "Thunder: Boscali colour"),
+        ("HUD Layout", "ThunderFactionPalette#Primeva", "Thunder: Primeva colour"),
         (null, null, "CHASE AND ORBIT HUD"),
         ("Chase HUD", "Map", "Minimap"),
         ("Chase HUD", "PitchLadder", "Pitch ladder"),
@@ -173,6 +177,14 @@ internal sealed class SettingsPage : MonoBehaviour
         foreach (var (section, key, label) in Layout)
         {
             if (section == null) { AddPanel(label, wide: false); continue; }
+            if (key.Contains("#"))
+            {
+                // Thunder's palette is one text setting; each faction gets a colour list instead.
+                var palette = new ConfigDefinition(section, key.Substring(0, key.IndexOf('#')));
+                if (config.ContainsKey(palette) && config[palette] is ConfigEntry<string> text)
+                    AddFactionColour(label, text, key.Substring(key.IndexOf('#') + 1));
+                continue;
+            }
             var definition = new ConfigDefinition(section, key);
             if (!config.ContainsKey(definition)) continue;
             ConfigEntryBase entry = config[definition];
@@ -181,6 +193,10 @@ internal sealed class SettingsPage : MonoBehaviour
             else if (entry.SettingType == typeof(float) && entry.Description?.AcceptableValues is AcceptableValueRange<float> range)
                 AddSlider(label, entry, range.MinValue, range.MaxValue);
         }
+        // Mod compatibility: one row per integration. Greyed out when that mod is not installed;
+        // otherwise its switch, with whether it is working (hooked in).
+        AddPanel("MOD COMPATIBILITY", wide: true);
+        foreach (Integrations.Info info in Integrations.All) AddIntegration(info);
         EndPanel();
 
         // The content scrolls: as tall as the boxes, pinned to the top, opened at the top.
@@ -313,6 +329,83 @@ internal sealed class SettingsPage : MonoBehaviour
             foreach (Text t in control.GetComponentsInChildren<Text>(true)) t.fontSize = Mathf.RoundToInt(t.fontSize * 1.2f);
         }
         return row;
+    }
+
+    private void AddIntegration(Integrations.Info info)
+    {
+        string status = Integrations.Status(info);
+        bool installed = status != "not installed";
+        Row($"{info.Name}  <size=75%><alpha=#99>{status}</size>", TogglePart, false, out GameObject control, out _);
+        Toggle toggle = control.GetComponent<Toggle>();
+        toggle.onValueChanged = new Toggle.ToggleEvent();
+        toggle.SetIsOnWithoutNotify(installed && info.On);
+        toggle.interactable = installed;
+        if (installed) toggle.onValueChanged.AddListener(on => info.Enabled.Value = on);
+        else
+        {
+            // Greyed out: the whole row dimmed, the box unticked and locked.
+            foreach (Graphic g in control.transform.parent.GetComponentsInChildren<Graphic>(true))
+                g.color = new Color(g.color.r, g.color.g, g.color.b, g.color.a * 0.4f);
+        }
+    }
+
+    // Thunder faction colours: named colours (plus the current one if it is a custom value).
+    private static readonly (string Name, string Hex)[] Colours =
+    {
+        ("Green", "#4CAF50"), ("Red", "#E53935"), ("Blue", "#1E88E5"), ("Cyan", "#00BCD4"),
+        ("Orange", "#FB8C00"), ("Yellow", "#FDD835"), ("Purple", "#8E24AA"), ("White", "#FFFFFF"),
+    };
+
+    private void AddFactionColour(string label, ConfigEntry<string> palette, string faction)
+    {
+        string[] tags = faction == "Boscali" ? new[] { "BDF", "Boscali" } : new[] { "PALA", "Primeva" };
+        string current = PaletteColour(palette.Value, tags);
+        var names = new System.Collections.Generic.List<string>();
+        var hexes = new System.Collections.Generic.List<string>();
+        foreach (var (name, hex) in Colours) { names.Add(name); hexes.Add(hex); }
+        int index = hexes.FindIndex(h => string.Equals(h, current, StringComparison.OrdinalIgnoreCase));
+        if (index < 0 && !string.IsNullOrEmpty(current)) { names.Insert(0, "Custom " + current); hexes.Insert(0, current); index = 0; }
+        Row(label, DropdownPart, false, out GameObject control, out _);
+        Dropdown dropdown = control.GetComponent<Dropdown>();
+        dropdown.onValueChanged = new Dropdown.DropdownEvent();
+        dropdown.ClearOptions();
+        dropdown.AddOptions(names);
+        dropdown.SetValueWithoutNotify(Math.Max(0, index));
+        dropdown.RefreshShownValue();
+        dropdown.onValueChanged.AddListener(i =>
+        {
+            if (i >= 0 && i < hexes.Count) palette.Value = SetPaletteColour(palette.Value, tags, hexes[i]);
+        });
+    }
+
+    // "BDF=#4CAF50, PALA=#E53935" → the colour of the first tag listed.
+    private static string PaletteColour(string palette, string[] tags)
+    {
+        foreach (string pair in (palette ?? "").Split(','))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0) continue;
+            string tag = pair.Substring(0, eq).Trim();
+            foreach (string t in tags)
+                if (string.Equals(tag, t, StringComparison.OrdinalIgnoreCase)) return pair.Substring(eq + 1).Trim();
+        }
+        return null;
+    }
+
+    // Replace (or add) the colour for every tag of one faction, keeping the other entries.
+    private static string SetPaletteColour(string palette, string[] tags, string hex)
+    {
+        var kept = new System.Collections.Generic.List<string>();
+        foreach (string pair in (palette ?? "").Split(','))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0) continue;
+            string tag = pair.Substring(0, eq).Trim();
+            if (Array.Exists(tags, t => string.Equals(tag, t, StringComparison.OrdinalIgnoreCase))) continue;
+            kept.Add(pair.Trim());
+        }
+        foreach (string t in tags) kept.Add($"{t}={hex}");
+        return string.Join(", ", kept);
     }
 
     private void AddToggle(string label, ConfigEntryBase entry)

@@ -26,6 +26,8 @@ internal sealed class ChaseHudUpdater : MonoBehaviour
         HudElements.FadeHelmet(ArcadeHud.NativeInstrumentsHidden && !DynamicMap.mapMaximized);
         HudDiagnostics.Tick();
         TargetingScreenOverlay.Tick(cam);
+        MissileIndicatorsCompat.Tick(HudElementPositions.Style.Value, Plugin.MatchMissileIndicators.Value);
+        HudHide.Apply();   // last: everything else has had its say this frame
     }
 
     private void OnDestroy()
@@ -34,6 +36,7 @@ internal sealed class ChaseHudUpdater : MonoBehaviour
         ArcadeHud.Dispose();
         NoAutopilotCompat.SetHidden(false);
         RwrCompat.Dispose();
+        MissileIndicatorsCompat.Dispose();
         HudElements.FadeHelmet(false);
         HudElements.Dispose();
         TargetingScreenOverlay.Dispose();

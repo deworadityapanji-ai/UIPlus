@@ -24,7 +24,8 @@ static class UIPlusRewiredActions
 
     private static readonly ActionDefinition[] Actions =
     {
-        new ActionDefinition { Name = Plugin.ACTION_MAP_ZOOM, Descriptive = "UI Plus Minimap Zoom", Store = id => Plugin.MapZoomActionId = id }
+        new ActionDefinition { Name = Plugin.ACTION_MAP_ZOOM, Descriptive = "UI Plus Minimap Zoom", Store = id => Plugin.MapZoomActionId = id },
+        new ActionDefinition { Name = Plugin.ACTION_HIDE_HUD, Descriptive = "UI Plus Hide HUD", Store = id => Plugin.HideHudActionId = id }
     };
 
     [HarmonyPrefix]

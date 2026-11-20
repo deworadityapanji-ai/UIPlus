@@ -16,7 +16,8 @@ namespace UIPlus.Helpers;
 // replace them at once. Nothing is changed in Yappinator; its playback is only observed.
 internal static class YappinatorCompat
 {
-    private const string Guid = "com.nikkorap.WSOYappinator";
+    internal const string Guid = "com.nikkorap.WSOYappinator";
+    internal static bool Working { get; private set; }
     private sealed class Line { internal string Speaker, Text; internal float Seconds; }
 
     // By the clip's own name (Yappinator names clips from their path), and by plain file name.
@@ -40,6 +41,7 @@ internal static class YappinatorCompat
             int lines = Load(info.Location);
             new Harmony(MyPluginInfo.PLUGIN_GUID + ".yappinator").Patch(tryPlay,
                 postfix: new HarmonyMethod(typeof(YappinatorCompat), nameof(Played)));
+            Working = true;
             Plugin.Logger.LogInfo($"WSO Yappinator found: {lines} dialogue lines will show as subtitles.");
         }
         catch (Exception e) { Plugin.Logger.LogWarning("WSO Yappinator voice subtitles unavailable: " + e.Message); }
@@ -86,6 +88,7 @@ internal static class YappinatorCompat
         try
         {
             if (clip == null || string.IsNullOrEmpty(clip.name)) return;
+            if (Integrations.Yappinator != null && !Integrations.Yappinator.On) return;
             if (!ByClipName.TryGetValue(clip.name, out Line line) && !ByFile.TryGetValue(Path.GetFileName(clip.name), out line)) return;
             ArcadeHud.QueueVoice(line.Speaker ?? "", line.Text, line.Seconds);
         }

@@ -32,6 +32,13 @@ matching line from the voice pack's `*_dialogue.txt` file as a subtitle. nikkora
 compatibility work. No code from the mod or its fork is used, and Yappinator's DLL, audio and configuration
 files are not bundled, replaced or modified; users install it separately.
 
+### Optional NO Missile Indicators interoperability
+
+[NO Missile Indicators](https://github.com/baanish/NO-Missile-Indicators), by baanish (MIT licence), is an
+optional separate mod. When it is installed, UI Plus sets its indicator style in memory to match the HUD
+style (its Project Wingman style in Wingman, its arrows elsewhere) and puts the player's own choice back
+afterwards. No code from the mod is used, and its DLL and settings file are not bundled or modified.
+
 ### Referenced build dependencies
 
 Not redistributed — referenced at build time and expected to be present at runtime.

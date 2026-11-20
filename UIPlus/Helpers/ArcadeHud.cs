@@ -97,7 +97,7 @@ internal static partial class ArcadeHud
     internal static void Tick(CameraStateManager cam)
     {
         FlightHud hud = SceneSingleton<FlightHud>.i;
-        bool want = Plugin.IsActive && HudViews.Showing(cam)
+        bool want = Plugin.IsActive && !HudHide.Hidden && HudViews.Showing(cam)
             && CustomHudActive && hud != null && !DynamicMap.mapMaximized
             && cam.followingUnit is Aircraft;
         Canvas flightCanvas = want ? FlightCanvas(hud) : null;
@@ -125,6 +125,7 @@ internal static partial class ArcadeHud
                 && (_builtSpeedSkin != ElementLooks.SkinOf(SpeedBlock) || _builtAltSkin != ElementLooks.SkinOf(AltBlock)))
             || (!_plus && (_builtFeedSkin != ElementLooks.SkinOf(KillFeedItem) || _builtDamageSkin != ElementLooks.SkinOf(HudElementPositions.Damage)))
             || (_minimal && _builtRwrAway != RwrAway)
+            || (Plugin.TextContrast != null && _builtContrast != Plugin.TextContrast.Value)
             || (!_plus && !_minimal && !_thunder && _builtListSkin != ElementLooks.SkinOf(WeaponList))
             || (!_plus && _builtStarWheel != (!_wingCluster && !ElementLooks.Get(WeaponWheelItem).Hidden && ElementLooks.SkinOf(WeaponWheelItem) == 1)))
             Build(flightCanvas, hud, aircraft);
@@ -149,6 +150,7 @@ internal static partial class ArcadeHud
         Refresh(aircraft);
         UpdateIcons(aircraft);
         UpdateWarnings(aircraft);
+        UpdateMissileArcs(aircraft);
         UpdateMessages();
         UpdateWeaponPopup(aircraft);
         ApplyOffsets();
@@ -218,6 +220,7 @@ internal static partial class ArcadeHud
         if (_root != null) Object.Destroy(_root);
         Rows.Clear();
         _aircraft = aircraft;
+        _builtContrast = Plugin.TextContrast != null ? Plugin.TextContrast.Value : TextHalo.Strength.Off;
 
         // Borrow the game's HUD colour, font and font material from the altitude readout, which the
         // game styles with its main HUD text colour and never recolours for warnings.
@@ -377,6 +380,7 @@ internal static partial class ArcadeHud
         BuildWeaponPopup();
         BuildTargetFrame();
         BuildKillFeed();
+        BuildMissileArcs();
         // Weapon range: on Wingman's divider (to its right, on the line), on Arcade's throttle tape
         // (the aircraft side, beyond the tape's own ticks).
         if (_wingDivider != null) BuildRangeScale(_wingDivider, 160f, 1f, 3f, 0f);
@@ -1103,6 +1107,7 @@ internal static partial class ArcadeHud
     private static readonly List<Gauge> ExtraFuel = new(), ExtraThrottle = new();
     private static Vector2 _fuelTapeBase, _throttleTapeBase;
     private static int _builtSpeedSkin, _builtAltSkin, _builtFeedSkin, _builtDamageSkin;
+    private static TextHalo.Strength _builtContrast;
     private static bool _damageIcons, _builtRwrAway, _wingCluster, _builtStarWheel;
     private static int _builtListSkin;
 
@@ -1272,6 +1277,8 @@ internal static partial class ArcadeHud
         t.enableWordWrapping = false;
         t.overflowMode = TextOverflowModes.Overflow;
         t.raycastTarget = false;
+        // High contrast: a soft dark halo behind it (not in Dashboard, whose strip is already dark).
+        if (_builtContrast != TextHalo.Strength.Off && !_minimal) TextHalo.Add(t, _builtContrast);
         return t;
     }
 
@@ -1730,6 +1737,7 @@ internal static partial class ArcadeHud
         Offset(_speed, SpeedBlock, SpeedBase, unit);
         Offset(_alt, AltBlock, AltBase, unit);
         Offset(_starWheel, WeaponWheelItem, StarWheelBase, unit);
+        Offset(_arcs, MissileArcsItem, MissileArcsBase, unit);
         Offset(_fuelTape, FuelTapeItem, _fuelTapeBase, unit);
         Offset(_throttleTape, ThrottleTapeItem, _throttleTapeBase, unit);
         Offset(_list, WeaponList, ListBase, unit);
@@ -1809,6 +1817,7 @@ internal static partial class ArcadeHud
             : id == KillFeedItem ? _killFeed
             : id == FuelTapeItem ? _fuelTape
             : id == WeaponWheelItem ? _starWheel
+            : id == MissileArcsItem ? _arcs
             : id == ThrottleTapeItem ? _throttleTape
             : id == SubtitleItem && _subtitleGroup != null && _subtitleGroup.alpha > 0.01f ? _subtitle
             : id == BannerItem && _bannerGroup != null && _bannerGroup.alpha > 0.01f ? _banner
