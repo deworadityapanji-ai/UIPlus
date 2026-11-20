@@ -18,6 +18,12 @@
 | **Thunder** | War Thunder | A dense text readout, faction score bar, map in the top-right corner |
 | **Native** | The game itself | The game's own HUD, with your positions |
 
+| Arcade | Wingman |
+|---|---|
+| ![Arcade style](docs/screenshots/arcade.webp) | ![Wingman style](docs/screenshots/wingman.webp) |
+| **Thunder** | **Dashboard** |
+| ![Thunder style](docs/screenshots/thunder.webp) | ![Dashboard style](docs/screenshots/dashboard.webp) |
+
 ## The editor
 
 Open it from the **UI PLUS** tab in the game's settings (or from Configuration Manager), then:
@@ -88,12 +94,15 @@ spawn_1.wav, Viper: All systems green, let's go.
 - **Speaker** (optional): shown above the subtitle. Leave out `Speaker:` to show the line alone.
 - **Duration** (optional): how long the subtitle stays, in minutes and seconds. Without it, the time is worked out from the line's length.
 
+**Ready-made: the Galaxy voice pack.** A complete dialogue file for nikkorap's **Galaxy** voice pack (all 116 lines) is included: [examples/WSOYappinator/Galaxy/galaxy_dialogue.txt](examples/WSOYappinator/Galaxy/galaxy_dialogue.txt). Put it in `BepInEx/plugins/WSOYappinator/audio/Galaxy/`. The voice pack and its lines are nikkorap's work; the file only transcribes them for subtitles.
+
 Restart the game after adding or changing a dialogue file. The game's log (`BepInEx/LogOutput.log`) says how many lines UI Plus loaded.
 
 ## Credits
 
 - Split out of [ArcadeCam](https://github.com/deworadityapanji-ai/ArcadeCam), itself a fork of [ChaseCamPlus by CarloApri](https://github.com/CarloApri/NO-ChaseCamPlus). The original MIT licence is kept.
 - Integrations made with the permission of the authors of Ace Combat Style Reloads (Dandy-Yak), KaceyTronic RWR (KcTries) and WSO Yappinator (nikkorap). Full details in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+- The Galaxy dialogue file transcribes the lines of nikkorap's Galaxy voice pack for WSO Yappinator. The voice pack and its lines are his.
 - Made with substantial AI assistance.
 
 UI Plus is a community mod, not affiliated with Shockfront Studios. The style names refer to the games that inspired them; this is not an official tie-in with any of them.

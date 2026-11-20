@@ -32,6 +32,10 @@ matching line from the voice pack's `*_dialogue.txt` file as a subtitle. nikkora
 compatibility work. No code from the mod or its fork is used, and Yappinator's DLL, audio and configuration
 files are not bundled, replaced or modified; users install it separately.
 
+The repository includes `examples/WSOYappinator/Galaxy/galaxy_dialogue.txt`, a transcription of the lines of
+nikkorap's Galaxy voice pack, so its voice lines can show as subtitles. The voice pack, its audio and its lines are
+nikkorap's work; no audio is included.
+
 ### Optional NO Missile Indicators interoperability
 
 [NO Missile Indicators](https://github.com/baanish/NO-Missile-Indicators), by baanish (MIT licence), is an
