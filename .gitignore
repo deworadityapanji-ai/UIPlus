@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+*.dll
+*.pdb
+release/
+
+# Local tooling and machine-specific settings (your own game path)
+.tools/
+UIPlus/GameDir.local.targets
+
+# IDE / editor
+.vs/
+.idea/
+.claude/
+CLAUDE.md
+*.user
+*.suo
+*.userprefs
+
+# Decompiled game code or other mods' files are never published
+.reference/

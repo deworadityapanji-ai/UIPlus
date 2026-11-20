@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../UIPlus/GameDir.targets" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../UIPlus/Helpers/HudAttachment.cs" Link="HudAttachment.cs" />
+    <Compile Include="../../UIPlus/Helpers/HudLayoutMath.cs" Link="HudLayoutMath.cs" />
+    <Compile Include="../../UIPlus/Helpers/HudCanvasMath.cs" Link="HudCanvasMath.cs" />
+    <Compile Include="../../UIPlus/Helpers/HudLayoutStamp.cs" Link="HudLayoutStamp.cs" />
+    <Compile Include="../../UIPlus/Helpers/TargetingScreenLayout.cs" Link="TargetingScreenLayout.cs" />
+    <Compile Include="../../UIPlus/Helpers/TargetingFeedReadiness.cs" Link="TargetingFeedReadiness.cs" />
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameDir)\NuclearOption_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
