@@ -24,6 +24,7 @@ UI Plus is a HUD overhaul for Nuclear Option. It comes with four preset HUD styl
 - **Hide HUD** hotkey: one press hides the whole HUD while flying, the next brings it back (bind "UI Plus Hide HUD" in Flight Controls).
 - **Missile arcs** (Arcade, or any style as an extra): Ace Combat-style red arcs on a ring showing where incoming missiles come from, growing as they close in. Hidden in player-versus-player games.
 - **High contrast:** a soft dark halo behind HUD text keeps it readable over bright sky (Off / Soft / Strong).
+- **Steady HUD** (from SteadyHudMarkers by musket golfer): target markers no longer sway in third person, the HUD centre stays upright, and the compass can follow the camera.
 - **Fix for a game bug:** the target arrow no longer points the wrong way when your target is behind you.
 - With ArcadeCam installed: HIT / MISS / DESTROYED callouts.
 
@@ -33,6 +34,7 @@ UI Plus is a HUD overhaul for Nuclear Option. It comes with four preset HUD styl
 - **Ace Combat Style Reloads:** reserves and reload progress.
 - **NeutralQoL** and **NOAutopilot:** their fuel overlays step aside when a style shows its own.
 - **NO Missile Indicators:** its style follows the HUD style (Project Wingman's 3D indicator in Wingman, arrows elsewhere), and its arrows step aside where UI Plus's missile arcs show.
+- **NuclearMinimap:** it runs the minimap and UI Plus leaves it to it; its cockpit map stays readable.
 - **WSO Yappinator:** voice lines as subtitles. This needs a little work: each voice pack needs a dialogue text file for its lines to show.
 
 **Beta**

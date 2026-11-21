@@ -20,7 +20,25 @@ namespace UIPlus.Helpers;
 [HarmonyPatch(typeof(DynamicMap), nameof(DynamicMap.Maximize))]
 internal static class MinimapZoomMaximizePatch
 {
-    private static void Prefix(DynamicMap __instance) => MinimapZoom.BeforeMaximize(__instance);
+    private static void Prefix(DynamicMap __instance)
+    {
+        MinimapZoom.BeforeMaximize(__instance);
+        // The game moves the map to the full-screen view keeping its on-screen turn. Hand it the
+        // map as the game laid it out (no lean, no rotating clip), or each opening bakes Wingman's
+        // lean into the map: it turned a little more and shrank every time.
+        HudElementPositions.Restore();
+    }
+}
+
+[HarmonyPatch(typeof(DynamicMap), nameof(DynamicMap.Minimize))]
+internal static class MapMinimizeUnturnPatch
+{
+    // Back on the HUD: the map itself is never turned (its panel is); clear a turn left from before.
+    private static void Postfix(DynamicMap __instance)
+    {
+        if (__instance != null && __instance.transform.localRotation != Quaternion.identity)
+            __instance.transform.localRotation = Quaternion.identity;
+    }
 }
 
 internal static class MinimapZoom
@@ -87,6 +105,13 @@ internal static class MinimapZoom
         }
         if (map == null || map.mapImage == null || map.mapBackground == null || !Enabled.Value || !Plugin.IsActive)
         {
+            if (_label != null) _label.gameObject.SetActive(false);
+            return;
+        }
+        // NuclearMinimap has its own minimap zoom: hand the map back and stay out of its way.
+        if (HudElementPositions.NuclearMinimapPresent)
+        {
+            HandBack(map);
             if (_label != null) _label.gameObject.SetActive(false);
             return;
         }

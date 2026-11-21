@@ -45,6 +45,7 @@ Every style keeps its own saved layout. **Reset** puts the style you're editing 
 - **Hide HUD** hotkey (bind "UI Plus Hide HUD"): one press hides the whole HUD while flying, for screenshots and clean views.
 - **Missile arcs:** Ace Combat-style red arcs around your aircraft showing where incoming missiles come from, growing as they close in. Hidden in player-versus-player games.
 - **High contrast:** a soft dark halo behind HUD text keeps it readable over bright sky (Off / Soft / Strong).
+- **Steady HUD** (from SteadyHudMarkers by musket golfer): target markers no longer sway in third person, the HUD centre stays upright, and the compass can follow the camera.
 - **Fix for a game bug:** the target arrow pointed the wrong way when your target was behind you.
 
 ## Installation
@@ -68,6 +69,8 @@ UI Plus needs none of these, but it works with each of them when installed. The 
 | **NO Missile Indicators** | Its style follows the HUD style (Project Wingman's 3D indicator in Wingman, arrows elsewhere), and its arrows step aside where the missile arcs show |
 | **WSO Yappinator** | Voice lines as subtitles ([see below](#voice-line-subtitles-wso-yappinator)) |
 | **NeutralQoL**, **NOAutopilot** | Their fuel overlays step aside while the Thunder style shows its own |
+| **NuclearMinimap** | It runs the minimap (orientation, zoom, centring) and UI Plus leaves those to it; its cockpit map stays readable |
+| **SteadyHudMarkers** | Built in as UI Plus's Steady HUD; if the standalone is installed, UI Plus leaves the job to it |
 
 ## Voice line subtitles (WSO Yappinator)
 
@@ -102,6 +105,7 @@ Restart the game after adding or changing a dialogue file. The game's log (`BepI
 
 - Split out of [ArcadeCam](https://github.com/deworadityapanji-ai/ArcadeCam), itself a fork of [ChaseCamPlus by CarloApri](https://github.com/CarloApri/NO-ChaseCamPlus). The original MIT licence is kept.
 - Integrations made with the permission of the authors of Ace Combat Style Reloads (Dandy-Yak), KaceyTronic RWR (KcTries) and WSO Yappinator (nikkorap). Full details in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+- Steady HUD is built in from [SteadyHudMarkers](THIRD-PARTY-NOTICES.md) by musket golfer, with their permission.
 - The Galaxy dialogue file transcribes the lines of nikkorap's Galaxy voice pack for WSO Yappinator. The voice pack and its lines are his.
 - Made with substantial AI assistance.
 

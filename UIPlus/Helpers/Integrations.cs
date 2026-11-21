@@ -22,7 +22,7 @@ internal static class Integrations
     }
 
     internal static readonly List<Info> All = new();
-    internal static Info ArcadeCam, Rwr, Reloads, Yappinator, NeutralQol, NoAutopilot, MissileIndicators;
+    internal static Info ArcadeCam, Rwr, Reloads, Yappinator, NeutralQol, NoAutopilot, MissileIndicators, NuclearMinimap;
 
     private static Func<bool> Plugin(string guid) => () => Chainloader.PluginInfos.ContainsKey(guid);
 
@@ -49,6 +49,9 @@ internal static class Integrations
         MissileIndicators = Add(config, "NO Missile Indicators", "MatchMissileIndicators",
             "Its style follows the HUD style, and its arrows step aside where UI Plus's missile arcs show.",
             Plugin(MissileIndicatorsCompat.Guid), () => MissileIndicatorsCompat.Working);
+        NuclearMinimap = Add(config, "NuclearMinimap", "NuclearMinimapSafeLean",
+            "It runs the minimap (orientation, zoom, centring); UI Plus leaves those to it, keeps its cockpit map readable, and hides its own map backing when NuclearMinimap hides the HUD map.",
+            Plugin(HudElementPositions.NuclearMinimapGuid), Plugin(HudElementPositions.NuclearMinimapGuid));
     }
 
     private static Info Add(ConfigFile config, string name, string key, string what, Func<bool> installed, Func<bool> working)

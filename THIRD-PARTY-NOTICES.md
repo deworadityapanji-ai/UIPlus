@@ -43,6 +43,12 @@ optional separate mod. When it is installed, UI Plus sets its indicator style in
 style (its Project Wingman style in Wingman, its arrows elsewhere) and puts the player's own choice back
 afterwards. No code from the mod is used, and its DLL and settings file are not bundled or modified.
 
+### SteadyHudMarkers (built in)
+
+UI Plus's Steady HUD settings (steady target markers, upright HUD centre, compass following the camera)
+are a built-in version of SteadyHudMarkers by musket golfer, included with their permission. When the standalone
+SteadyHudMarkers is installed, UI Plus leaves those features to it.
+
 ### Referenced build dependencies
 
 Not redistributed — referenced at build time and expected to be present at runtime.

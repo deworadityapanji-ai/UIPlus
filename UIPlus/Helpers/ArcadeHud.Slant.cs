@@ -17,7 +17,7 @@ internal static partial class ArcadeHud
 
     // Rotation for the map panel (degrees, about its bottom-left corner), 0 when not leaning.
     internal static float MapLeanDegrees =>
-        _wingman && _builtSlant && _root != null && _root.activeSelf ? LeanDegrees : 0f;
+        _wingman && _builtSlant && _root != null && _root.activeSelf && !HudElementPositions.NuclearMinimapPresent ? LeanDegrees : 0f;
 
     private static void ApplySlant()
     {

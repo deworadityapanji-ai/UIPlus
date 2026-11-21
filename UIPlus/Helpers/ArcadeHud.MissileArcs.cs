@@ -61,7 +61,7 @@ internal static partial class ArcadeHud
             Place(ref shown, 200f, 0.55f, red);
             Place(ref shown, 300f, 1f, red);
         }
-        else if (camera != null && !IsPvp() && aircraft.GetMissileWarningSystem() is MissileWarning warning)
+        else if (camera != null && (Plugin.MissileArcsInPvp.Value || !IsPvp()) && aircraft.GetMissileWarningSystem() is MissileWarning warning)
         {
             CombatHUD hud = SceneSingleton<CombatHUD>.i;
             foreach (Missile missile in warning.knownMissiles)

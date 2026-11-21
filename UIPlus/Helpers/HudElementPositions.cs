@@ -304,7 +304,10 @@ internal static class HudElementPositions
             Vector3 centre = Vector3.Scale(rect.rect.center, _baseScale[id]);
             wanted += leaned * centre - rotation * (centre * k);
         }
-        if (id == Map) RotatableClip(lean != 0f || look.Rotation != 0f);
+        // The rotating clip puts a (hidden) mask graphic on the map object. NuclearMinimap copies every
+        // graphic of the map onto its cockpit screen, where that mask shows as a white square, so with
+        // it installed the game's own clipping stays (the leaned map's corners are clipped square).
+        if (id == Map) RotatableClip((lean != 0f || look.Rotation != 0f) && !NuclearMinimapPresent);
         if ((current.localPosition - wanted).sqrMagnitude > 0.0001f)
             current.localPosition = wanted;
     }
@@ -363,6 +366,12 @@ internal static class HudElementPositions
         }
         // The map may show only part of its own box (a padded clip); size to what is shown.
         if (id == Map) ShrinkToMapClip(panel, ref min, ref max);
+        // NuclearMinimap hides the HUD minimap while its cockpit map shows; the backing goes with it.
+        if (id == Map)
+        {
+            bool shown = !NuclearMinimapHidesMap;
+            if (b.Rect.gameObject.activeSelf != shown) b.Rect.gameObject.SetActive(shown);
+        }
         const float pad = 10f;
         RectTransform rt = b.Rect;
         rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
@@ -470,6 +479,24 @@ internal static class HudElementPositions
     private static bool _ownsMaskImage;
 
     private static Sprite _maskSprite;
+
+    // NuclearMinimap hides the HUD map by making the map's own graphics fully transparent.
+    private static bool NuclearMinimapHidesMap
+    {
+        get
+        {
+            if (!NuclearMinimapPresent) return false;
+            DynamicMap map = SceneSingleton<DynamicMap>.i;
+            CanvasRenderer terrain = map != null && map.mapImage != null ? map.mapImage.GetComponent<CanvasRenderer>() : null;
+            return terrain != null && terrain.GetColor().a < 0.01f;
+        }
+    }
+    internal const string NuclearMinimapGuid = "dev.dikka.nuclearminimap";
+    /// <summary>NuclearMinimap is installed (and its integration on): it owns the minimap's orientation,
+    /// zoom and centring, so UI Plus leaves those alone.</summary>
+    internal static bool NuclearMinimapPresent =>
+        BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(NuclearMinimapGuid)
+        && (Integrations.NuclearMinimap == null || Integrations.NuclearMinimap.On);
     private static bool _ownsMask;
 
     private static void RotatableClip(bool on)

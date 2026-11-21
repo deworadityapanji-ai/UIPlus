@@ -145,7 +145,8 @@ internal static partial class ArcadeHud
         }
         UpdateSilhouette(aircraft);
         // Arcade and Wingman lay the RWR over the map, so it is centred on the aircraft there.
-        if (!_minimal) { CentreMinimap(aircraft); MapDock = Vector2.zero; }
+        // NuclearMinimap centres the map on the aircraft itself (and owns its orientation).
+        if (!_minimal) { if (!HudElementPositions.NuclearMinimapPresent) CentreMinimap(aircraft); MapDock = Vector2.zero; }
         else { UpdateBall(aircraft); DockMap(); }
         Refresh(aircraft);
         UpdateIcons(aircraft);

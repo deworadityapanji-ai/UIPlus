@@ -39,6 +39,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> KillCallouts;
     public static ConfigEntry<bool> MatchMissileIndicators;
     public static ConfigEntry<bool> FixTargetArrow;
+    public static ConfigEntry<bool> MissileArcsInPvp;
     internal static ConfigEntry<TextHalo.Strength> TextContrast;
 
     // The action keeps its old ArcadeCam name: its id comes from the name, and the id is what
@@ -88,12 +89,16 @@ public class Plugin : BaseUnityPlugin
             "Fix a game bug: the HUD's target arrow (and other off-screen markers) pointed to the wrong side when the target was behind you (more than 90 degrees off the nose). Off restores the game's own behaviour.");
         TextContrast = Config.Bind("HUD Layout", "TextContrast", TextHalo.Strength.Soft,
             "High contrast: a soft dark halo behind the HUD text so it stays readable over bright sky and clouds, without changing its look. Soft is barely visible on a dark background; Strong for very bright scenes. Arcade, Wingman and Thunder (Dashboard's strip is already dark).");
+        MissileArcsInPvp = Config.Bind("HUD Layout", "MissileArcsInPvp", false,
+            "Also show the missile arcs in player-versus-player games (multiplayer with a human player on another faction). Off by default, as the arcs may be an advantage there: only turn this on when the other players know and agree.");
+        SteadyHud.Bind(Config);
         HudViews.Bind(Config);
         HudLayoutEditor.Bind(Config, SectionChaseHud);
         HudElementPositions.Bind(Config);
         MinimapZoom.Bind(Config);
 
         var harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
+        _harmony = harmony;
         harmony.PatchAll();
         HudElements.Initialize();
         _hudUpdater = gameObject.AddComponent<ChaseHudUpdater>();
@@ -124,6 +129,16 @@ public class Plugin : BaseUnityPlugin
     {
         if (HudLayoutEditor.IsOpen) HudLayoutEditor.Draw();
         else TargetingScreenOverlay.Draw();
+    }
+
+    private Harmony _harmony;
+
+    // After every mod has loaded (Awake runs while they are still loading), so the steady HUD can
+    // see whether the standalone SteadyHudMarkers is installed before patching anything.
+    private void Start()
+    {
+        try { SteadyHud.Install(_harmony); }
+        catch (System.Exception e) { Logger.LogWarning("Steady HUD unavailable: " + e.Message); }
     }
 
     private void Update()
