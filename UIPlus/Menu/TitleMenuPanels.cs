@@ -7,7 +7,7 @@ namespace UIPlus.Menu;
 
 internal sealed class TitleMenuPanels
 {
-    private enum Edge { Top, BottomLeft, Bottom }
+    private enum Edge { Top, News, Bottom }
 
     private sealed class SlidingPanel
     {
@@ -16,16 +16,18 @@ internal sealed class TitleMenuPanels
         private readonly Canvas _canvas;
         private readonly Camera _camera;
         private readonly Edge _edge;
+        private readonly bool _mirrored;
         internal readonly Vector2 Home;
         private readonly Vector3[] _corners = new Vector3[4];
         private float _progress = 1f;
         private bool _pointerRevealed;
         internal bool CanNavigate { get; private set; }
 
-        internal SlidingPanel(MenuSnapshot snapshot, RectTransform rect, Edge edge)
+        internal SlidingPanel(MenuSnapshot snapshot, RectTransform rect, Edge edge, bool mirrored = false)
         {
             Rect = rect;
             _edge = edge;
+            _mirrored = mirrored;
             Home = rect.anchoredPosition;
             // Keep the GameObject and its own update logic alive, especially the tips carousel.
             _group = snapshot.Add<CanvasGroup>(rect.gameObject);
@@ -51,10 +53,11 @@ internal sealed class TitleMenuPanels
             float pointerFloor = bottomRevealEdge ?? float.NegativeInfinity;
             // Measure both hit targets at rest so the slide cannot catch or lose a stationary pointer.
             var shownBounds = new MenuLayout.PanelBounds(bottomLeft.x, bottomLeft.y, topRight.x, topRight.y);
-            var revealZone = _edge == Edge.Top
-                ? new MenuLayout.PanelBounds(float.NegativeInfinity, Screen.height - zoneSize, topRight.x + zoneSize, float.PositiveInfinity)
-                : new MenuLayout.PanelBounds(_edge == Edge.BottomLeft ? float.NegativeInfinity : bottomLeft.x - zoneSize,
-                    pointerFloor, topRight.x + zoneSize, (bottomRevealEdge ?? 0f) + zoneSize);
+            bool corner = _edge != Edge.Bottom;
+            float zoneLeft = corner && !_mirrored ? float.NegativeInfinity : bottomLeft.x - zoneSize;
+            float zoneRight = corner && _mirrored ? float.PositiveInfinity : topRight.x + zoneSize;
+            var revealZone = new MenuLayout.PanelBounds(zoneLeft, _edge == Edge.Top ? Screen.height - zoneSize : pointerFloor,
+                zoneRight, _edge == Edge.Top ? float.PositiveInfinity : (bottomRevealEdge ?? 0f) + zoneSize);
             _pointerRevealed = active && !hidden && autoHide && MenuLayout.PointerRevealsPanel(
                 _pointerRevealed, mouse.x, mouse.y, shownBounds, revealZone, 12f * _canvas.scaleFactor, pointerFloor);
             var selected = EventSystem.current?.currentSelectedGameObject;
@@ -65,7 +68,7 @@ internal sealed class TitleMenuPanels
             // Convert from screen pixels back to canvas units so the panel clears the edge at any scale.
             Vector2 offscreen = _edge == Edge.Top
                 ? new Vector2(0f, Screen.height - bottomLeft.y + 8f)
-                : new Vector2(_edge == Edge.BottomLeft ? -legacyZone : 0f, -topRight.y - 8f);
+                : new Vector2(_edge == Edge.News ? MenuLayout.OffsetX(-legacyZone, _mirrored) : 0f, -topRight.y - 8f);
             RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screenHome, _camera, out Vector2 home);
             RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screenHome + offscreen, _camera, out Vector2 off);
             float eased = MenuLayout.Ease(_progress);
@@ -104,10 +107,10 @@ internal sealed class TitleMenuPanels
         _layout = layout;
         _newsLinks = news.GetComponentsInChildren<Button>(true);
         _tipButtons = tips.GetComponentsInChildren<Button>(true);
-        TitleMenu.Place(news, Vector2.zero, Vector2.zero, newsPosition, news.rect.size);
+        TitleMenu.Place(news, Vector2.zero, Vector2.zero, newsPosition, news.rect.size, layout.Mirrored);
         _compact = new CompactMenuNews(layout, version, _newsLinks);
-        _logo = new SlidingPanel(snapshot, logo, Edge.Top);
-        _news = new SlidingPanel(snapshot, news, Edge.BottomLeft);
+        _logo = new SlidingPanel(snapshot, logo, Edge.Top, layout.Mirrored);
+        _news = new SlidingPanel(snapshot, news, Edge.News, layout.Mirrored);
         _tips = new SlidingPanel(snapshot, tips, Edge.Bottom);
     }
 
@@ -132,8 +135,10 @@ internal sealed class TitleMenuPanels
         changed |= _news.Tick(mouse, gamepad, modal, compact, news == MenuNews.AutoHide, false,
             fadeFloor: newsFadeFloor, bottomRevealEdge: bottomRevealEdge);
         Button version = Version;
+        RectTransform visibleNews = compact ? _compact.OpenPopup : _news.Rect;
+        Vector2 restOffset = compact ? Vector2.zero : _news.Home - _news.Rect.anchoredPosition;
         Vector2 tipsOffset = _layout.TipsShift(_tips.Rect, _tips.Home, version != null ? (RectTransform)version.transform : null,
-            out float? fadeFloor);
+            visibleNews, restOffset, out float? fadeFloor);
         changed |= _tips.Tick(mouse, gamepad, modal, tips == MenuTips.Hidden, tips == MenuTips.AutoHide, false,
             tipsOffset, fadeFloor, bottomRevealEdge);
         return changed;

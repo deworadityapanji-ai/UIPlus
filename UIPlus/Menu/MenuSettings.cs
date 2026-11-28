@@ -6,6 +6,7 @@ internal static class MenuSettings
 {
     internal const string Section = "Main Menu";
     internal static ConfigEntry<MenuStyle> Style;
+    internal static ConfigEntry<MenuSide> Side;
     internal static ConfigEntry<MenuTips> Tips;
     internal static ConfigEntry<MenuNews> News;
     internal static ConfigEntry<MenuLogo> Logo;
@@ -19,6 +20,8 @@ internal static class MenuSettings
     {
         Style = config.Bind(Section, "MenuStyle", MenuLayout.DefaultStyle,
             "Title menu style. Changes apply on the title screen when the settings menu closes.");
+        Side = config.Bind(Section, "MenuSide", MenuLayout.DefaultSide,
+            "Side of the title screen for custom menus. Changes apply when the settings menu closes.");
         Tips = config.Bind(Section, "MenuTips", MenuLayout.DefaultTips, "Show, auto-hide, or hide the title menu tips in custom menu styles.");
         News = config.Bind(Section, "MenuNews", MenuLayout.DefaultNews, "Show the version and links, collapse them behind the version, or auto-hide them in custom menu styles.");
         Logo = config.Bind(Section, "MenuLogo", MenuLayout.DefaultLogo, "Show or auto-hide the title logo in custom menu styles.");

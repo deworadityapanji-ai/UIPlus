@@ -29,25 +29,25 @@ internal static class BottomBar
         rect.offsetMax = new Vector2(0f, Height);
     }
 
-    internal static void PlaceLogoAndPilot(RectTransform logo, RectTransform caption, RectTransform name, Vector2 railLogoSize)
+    internal static void PlaceLogoAndPilot(RectTransform logo, RectTransform caption, RectTransform name, Vector2 railLogoSize, bool mirrored)
     {
-        TitleMenu.Place(logo, TopLeft, TopLeft, new Vector2(Inset, -Inset), railLogoSize * 0.70f);
-        TitleMenu.Place(caption, TopRight, TopRight, new Vector2(-Inset, -Inset), new Vector2(290f, 18f));
-        TitleMenu.Place(name, TopRight, TopRight, new Vector2(-Inset, -Inset - 18f), new Vector2(290f, 30f));
+        TitleMenu.Place(logo, TopLeft, TopLeft, new Vector2(Inset, -Inset), railLogoSize * 0.70f, mirrored);
+        TitleMenu.Place(caption, TopRight, TopRight, new Vector2(-Inset, -Inset), new Vector2(290f, 18f), mirrored);
+        TitleMenu.Place(name, TopRight, TopRight, new Vector2(-Inset, -Inset - 18f), new Vector2(290f, 30f), mirrored);
     }
 
-    internal static void PlaceVersion(RectTransform label, RectTransform popup)
+    internal static void PlaceVersion(RectTransform label, RectTransform popup, bool mirrored)
     {
-        TitleMenu.Place(label, BottomRight, BottomRight, new Vector2(-Inset, Height + 10f), new Vector2(126f, 37f));
-        TitleMenu.Place(popup, BottomRight, BottomRight, new Vector2(-Inset, Height + 51f), new Vector2(238f, 16f));
+        TitleMenu.Place(label, BottomRight, BottomRight, new Vector2(-Inset, Height + 10f), new Vector2(126f, 37f), mirrored);
+        TitleMenu.Place(popup, BottomRight, BottomRight, new Vector2(-Inset, Height + 51f), new Vector2(238f, 16f), mirrored);
     }
 
     internal static RectTransform MakeDivider(Transform parent) =>
         TitleMenuLayout.Paint("Group divider", parent, new Color(1f, 1f, 1f, 0.14f));
 
-    internal static void PlaceDivider(RectTransform divider, float start, bool fromRight)
+    internal static void PlaceDivider(RectTransform divider, float start, bool fromRight, bool mirrored)
     {
         Vector2 anchor = fromRight ? BottomRight : Vector2.zero;
-        TitleMenu.Place(divider, anchor, new Vector2(0f, 0.5f), new Vector2(start + 10f, Height * 0.5f), new Vector2(1f, 24f));
+        TitleMenu.Place(divider, anchor, new Vector2(0f, 0.5f), new Vector2(start + 10f, Height * 0.5f), new Vector2(1f, 24f), mirrored);
     }
 }

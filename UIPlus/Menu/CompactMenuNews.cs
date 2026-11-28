@@ -116,7 +116,8 @@ internal sealed class CompactMenuNews
         string original = version.text;
         int space = original.LastIndexOf(' ');
         string number = (space >= 0 ? original.Substring(space + 1) : original).TrimStart('v', 'V');
-        _label = layout.MakeLabel("v" + number, layout.Root, TitleMenuLayout.FooterFontSize, TextAlignmentOptions.MidlineRight);
+        _label = layout.MakeLabel("v" + number, layout.Root, TitleMenuLayout.FooterFontSize,
+            layout.Mirrored ? TextAlignmentOptions.MidlineLeft : TextAlignmentOptions.MidlineRight);
         _label.color = VersionDim;
         // The rail's font may lack the small triangles; fall back to plain signs rather than a missing-glyph box.
         bool arrows = !layout.IsCorner && !layout.IsBar && _label.font != null &&
@@ -132,18 +133,19 @@ internal sealed class CompactMenuNews
         _toggle.onClick.AddListener(() => SetOpen(!_open));
         var anchor = new Vector2(1f, 0f);
         Vector2 labelAt = layout.IsCorner ? new Vector2(-44f, 23f) : new Vector2(-35f, 23f);
-        if (!layout.IsBar) TitleMenu.Place(_label.rectTransform, anchor, anchor, labelAt, new Vector2(126f, 37f));
+        if (!layout.IsBar) TitleMenu.Place(_label.rectTransform, anchor, anchor, labelAt, new Vector2(126f, 37f), layout.Mirrored);
 
         _popup = TitleMenuLayout.Paint("Version links", layout.Root, TitleMenuLayout.Background);
         layout.Own(_popup.gameObject);
         _popup.GetComponent<Image>().raycastTarget = true;
         // Keep the flyout clear of both the name field and the version control.
         if (layout.IsBar)
-            BottomBar.PlaceVersion(_label.rectTransform, _popup);
+            BottomBar.PlaceVersion(_label.rectTransform, _popup, layout.Mirrored);
         else if (layout.IsCorner)
-            TitleMenu.Place(_popup, anchor, anchor, new Vector2(-44f, 64f), new Vector2(238f, 16f));
+            TitleMenu.Place(_popup, anchor, anchor, new Vector2(-44f, 64f), new Vector2(238f, 16f), layout.Mirrored);
         else
-            TitleMenu.Place(_popup, Vector2.zero, Vector2.zero, new Vector2(SideRail.Width + 8f, 60f), new Vector2(238f, 16f));
+            TitleMenu.Place(_popup, Vector2.zero, Vector2.zero, new Vector2(SideRail.Width + 8f, 60f),
+                new Vector2(238f, 16f), layout.Mirrored);
         foreach (Button link in links)
             if (link.gameObject.activeSelf) _links.Add(new Link(link, layout, _popup, _links.Count));
         _popup.sizeDelta = new Vector2(_popup.sizeDelta.x, 16f + _links.Count * 33f);
@@ -161,6 +163,7 @@ internal sealed class CompactMenuNews
     internal void Close() => SetOpen(false);
 
     internal Button Version => _toggle.isActiveAndEnabled ? _toggle : null;
+    internal RectTransform OpenPopup => _open ? _popup : null;
 
     internal Button FirstLink
     {

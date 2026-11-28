@@ -74,6 +74,7 @@ internal sealed class SettingsPage : MonoBehaviour
         ("Chase HUD", "Compass", "Compass"),
         (null, null, "MAIN MENU"),
         (MenuSettings.Section, "MenuStyle", "Menu style"),
+        (MenuSettings.Section, "MenuSide", "Menu side"),
         (MenuSettings.Section, "MenuTips", "Tips"),
         (MenuSettings.Section, "MenuNews", "Version and links"),
         (MenuSettings.Section, "MenuLogo", "Logo"),

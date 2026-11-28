@@ -267,7 +267,6 @@ internal static partial class ArcadeHud
     {
         StatusBase = new Vector2(0f, -230f);
         DamageScale = 0.5f;
-        TraySlot = 150f;
         SubtitleBase = new Vector2(0f, -36f);
         if (_plus)
         {
@@ -280,7 +279,6 @@ internal static partial class ArcadeHud
             DamageBase = new Vector2(160f, 125f);    // bottom left (anchored to that corner)
             DamageScale = 0.65f;                     // a little larger than the other styles
             VectorBase = new Vector2(255f, 125f);    // LEFT edge of the gauge tray, just right of the silhouette
-            TraySlot = 130f;
             SubtitleBase = new Vector2(0f, -110f);   // below the faction bar
             return;
         }
@@ -290,7 +288,6 @@ internal static partial class ArcadeHud
             StatusBase = new Vector2(0f, -350f);
             DamageBase = new Vector2(1352f, -64f);
             DamageScale = 0.3f;
-            TraySlot = 100f;
             return;
         }
         if (_minimal)
@@ -299,7 +296,6 @@ internal static partial class ArcadeHud
             StatusBase = new Vector2(0f, -362f);
             DamageBase = new Vector2(1033f, -68f);   // inside the strip, its own section
             DamageScale = 0.3f;
-            TraySlot = 100f;                         // extra gauges must fit the strip's height
             return;
         }
         if (_wingman)

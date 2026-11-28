@@ -61,6 +61,7 @@ Under **Settings → UI PLUS → MAIN MENU**, choose **Bottom bar**, **Side rail
 
 Custom styles default to auto-hiding tips, showing the logo, and collapsing version and links into a clickable version label. Move the mouse to a hidden panel's screen edge to reveal it. Auto-hidden panels stay visible while a gamepad is the last input. Style changes, including a return to Vanilla, apply when you close settings on the title screen.
 Set **Accent colour** to **Green** (default), **Amber**, **White**, or **HUD colour** to change the custom styles' highlight bars.
+Set **Menu side** to **Left** (default) or **Right** to move the custom menu controls to that side. The change applies when you close settings on the title screen.
 
 ## Custom backgrounds
 

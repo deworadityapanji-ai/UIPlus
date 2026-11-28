@@ -4,6 +4,7 @@ using System.Text;
 namespace UIPlus.Menu;
 
 internal enum MenuStyle { Vanilla, SideRail, MinimalCorner, BottomBar }
+internal enum MenuSide { Left, Right }
 internal enum MenuTips { Shown, AutoHide, Hidden }
 internal enum MenuNews { Shown, Compact, AutoHide }
 internal enum MenuLogo { Shown, AutoHide }
@@ -15,6 +16,7 @@ internal enum MenuStyleChange { None, Restore, Build }
 internal static class MenuLayout
 {
     internal const MenuStyle DefaultStyle = MenuStyle.BottomBar;
+    internal const MenuSide DefaultSide = MenuSide.Left;
     internal const MenuTips DefaultTips = MenuTips.AutoHide;
     internal const MenuNews DefaultNews = MenuNews.Compact;
     internal const MenuLogo DefaultLogo = MenuLogo.Shown;
@@ -48,11 +50,27 @@ internal static class MenuLayout
         return new BarFit(15, 10f, text15 <= textSpace ? 1f : textSpace / text15);
     }
 
-    internal static MenuStyleChange StyleChange(MenuStyle? built, MenuStyle wanted, bool ready)
+    internal static MenuStyleChange StyleChange(MenuStyle? built, MenuStyle wanted, bool ready,
+        MenuSide builtSide = DefaultSide, MenuSide wantedSide = DefaultSide)
     {
-        if (!ready || (built ?? MenuStyle.Vanilla) == wanted) return MenuStyleChange.None;
+        if (!ready || ((built ?? MenuStyle.Vanilla) == wanted &&
+            (wanted == MenuStyle.Vanilla || builtSide == wantedSide))) return MenuStyleChange.None;
         return built.HasValue ? MenuStyleChange.Restore : MenuStyleChange.Build;
     }
+
+    internal static float AnchorX(float x, bool mirrored) => mirrored ? 1f - x : x;
+    internal static float OffsetX(float x, bool mirrored) => mirrored ? -x : x;
+
+    internal static int NavigationIndex(int index, int count, bool backwards, bool mirrored = false) =>
+        (index + count + NavigationStep(backwards, mirrored)) % count;
+
+    internal static int BarNeighbor(int index, int start, int end, bool left, bool mirrored)
+    {
+        int next = index + NavigationStep(left, mirrored);
+        return next >= start && next < end ? next : -1;
+    }
+
+    private static int NavigationStep(bool backwards, bool mirrored) => backwards != mirrored ? -1 : 1;
 
     internal static int IndexBefore(int current, int next, int count) =>
         next < 0 ? count - 1 : next - (current < next ? 1 : 0);
@@ -98,15 +116,15 @@ internal static class MenuLayout
         return (visibleGroups & bit) != 0 && (visibleGroups & (bit - 1)) != 0;
     }
 
-    internal static float TipsRightShift(float listLeft, float listRight, float listBottom, float listTop,
-        float tipsLeft, float tipsRight, float tipsBottom, float tipsTop) =>
+    internal static float TipsSideShift(float listLeft, float listRight, float listBottom, float listTop,
+        float tipsLeft, float tipsRight, float tipsBottom, float tipsTop, bool mirrored = false) =>
         tipsLeft < listRight && tipsRight > listLeft && tipsBottom < listTop && tipsTop > listBottom
-            ? listRight + 16f - tipsLeft : 0f;
+            ? (mirrored ? listLeft - 16f - tipsRight : listRight + 16f - tipsLeft) : 0f;
 
     internal static float TipsAboveBar(float barTop, float tipsBottom, float tipsTop, bool overlapsVersionHorizontally,
-        float versionBottom, float versionTop)
+        float versionBottom, float versionTop, float minimumShift = 0f)
     {
-        float shift = Math.Max(0f, barTop + 16f - tipsBottom);
+        float shift = Math.Max(minimumShift, barTop + 16f - tipsBottom);
         if (overlapsVersionHorizontally && tipsBottom + shift < versionTop && tipsTop + shift > versionBottom)
             shift = versionTop + 8f - tipsBottom;
         return shift;

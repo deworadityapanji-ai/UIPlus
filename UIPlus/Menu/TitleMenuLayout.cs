@@ -57,7 +57,7 @@ internal sealed class TitleMenuLayout
     private Color _accent;
     private Button _lateContinue, _lateLoad;
 
-    internal TitleMenuLayout(MenuSnapshot snapshot, MenuStyle style, RectTransform left, RectTransform container, RectTransform buttons,
+    internal TitleMenuLayout(MenuSnapshot snapshot, MenuStyle style, MenuSide side, RectTransform left, RectTransform container, RectTransform buttons,
         Button quit, Button missions, TMP_InputField name, RectTransform logo)
     {
         _left = left;
@@ -65,8 +65,9 @@ internal sealed class TitleMenuLayout
         _buttons = buttons;
         _missions = missions;
         _name = name;
+        Mirrored = side == MenuSide.Right;
         IsBar = style == MenuStyle.BottomBar;
-        if (style == MenuStyle.MinimalCorner) _corner = new MinimalCorner(snapshot);
+        if (style == MenuStyle.MinimalCorner) _corner = new MinimalCorner(snapshot, Mirrored);
         if (IsCorner || IsBar) _shadow = new MenuTextShadow(snapshot);
         _canvas = left.GetComponentInParent<Canvas>().rootCanvas;
         _camera = _canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : _canvas.worldCamera;
@@ -75,14 +76,15 @@ internal sealed class TitleMenuLayout
         if (leftArt != null) leftArt.enabled = false;
         if (innerArt != null) innerArt.enabled = false;
 
-        left.anchorMin = Vector2.zero;
-        left.anchorMax = IsCorner || IsBar ? Vector2.one : TopLeft;
-        left.pivot = new Vector2(0f, 0.5f);
+        float railEdge = IsCorner || IsBar ? 0f : MenuLayout.AnchorX(0f, Mirrored);
+        left.anchorMin = new Vector2(railEdge, 0f);
+        left.anchorMax = new Vector2(IsCorner || IsBar ? 1f : railEdge, 1f);
+        left.pivot = new Vector2(railEdge, 0.5f);
         left.anchoredPosition = Vector2.zero;
         left.sizeDelta = new Vector2(IsCorner || IsBar ? 0f : SideRail.Width, 0f);
         _input = snapshot.Add<CanvasGroup>(left.gameObject);
         RectTransform background = IsBar ? BottomBar.BuildBackground(left) :
-            IsCorner ? _corner.BuildScrim(left) : SideRail.BuildBackground(left);
+            IsCorner ? _corner.BuildScrim(left) : SideRail.BuildBackground(left, Mirrored);
         snapshot.Own(background.gameObject);
         background.SetAsFirstSibling();
         _rowArt = background;
@@ -106,7 +108,7 @@ internal sealed class TitleMenuLayout
         container.offsetMin = container.offsetMax = Vector2.zero;
         if (IsBar) BottomBar.PlaceList(buttons);
         else if (IsCorner) _corner.PlaceList(buttons);
-        else SideRail.PlaceList(buttons);
+        else SideRail.PlaceList(buttons, Mirrored);
         var layout = buttons.GetComponent<VerticalLayoutGroup>();
         if (IsBar)
         {
@@ -140,7 +142,7 @@ internal sealed class TitleMenuLayout
         }
         _quit = Style(quit.transform, quit, MenuLayout.QuitOrder, 0, "QUIT");
         if (IsCorner) _corner.PlaceQuit((RectTransform)quit.transform);
-        else if (!IsBar) SideRail.PlaceQuit((RectTransform)quit.transform);
+        else if (!IsBar) SideRail.PlaceQuit((RectTransform)quit.transform, Mirrored);
 
         float aspect = logo.rect.height > 0f ? logo.rect.width / logo.rect.height : 2f;
         var logoImage = logo.GetComponent<Image>();
@@ -152,18 +154,18 @@ internal sealed class TitleMenuLayout
         if (IsCorner || IsBar)
         {
             var label = MakeLabel("PILOT", left, 13f,
-                IsBar ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+                PilotOnRight ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
             label.characterSpacing = 4f;
             label.color = MinimalCorner.Dim;
             ShadowLabel(label);
-            if (IsBar) BottomBar.PlaceLogoAndPilot(logo, label.rectTransform, (RectTransform)_name.transform, logoSize);
+            if (IsBar) BottomBar.PlaceLogoAndPilot(logo, label.rectTransform, (RectTransform)_name.transform, logoSize, Mirrored);
             else _corner.PlaceLogoAndPilot(logo, label.rectTransform, (RectTransform)_name.transform, logoSize);
         }
         else
         {
-            SideRail.PlacePilot(Heading("PILOT", left, 0f), (RectTransform)_name.transform);
+            SideRail.PlacePilot(Heading("PILOT", left, 0f), (RectTransform)_name.transform, Mirrored);
             // Use the logo's home position so auto-hide never moves the divider or the rows.
-            _logoDividerDepth = SideRail.PlaceLogo(logo, background, logoSize);
+            _logoDividerDepth = SideRail.PlaceLogo(logo, background, logoSize, Mirrored);
         }
         StyleName();
     }
@@ -171,6 +173,8 @@ internal sealed class TitleMenuLayout
     internal RectTransform Root => _left;
     internal bool IsCorner => _corner != null;
     internal bool IsBar { get; }
+    internal bool Mirrored { get; }
+    private bool PilotOnRight => IsBar != Mirrored;
     internal float? BottomRevealEdge => IsBar
         ? RectTransformUtility.WorldToScreenPoint(_camera,
             _rowArt.TransformPoint(new Vector3(_rowArt.rect.center.x, _rowArt.rect.yMax, 0f))).y
@@ -181,27 +185,46 @@ internal sealed class TitleMenuLayout
 
     internal void Own(GameObject created) => _snapshot.Own(created);
 
-    internal Vector2 TipsShift(RectTransform tips, Vector2 home, RectTransform version, out float? fadeFloor)
+    internal Vector2 TipsShift(RectTransform tips, Vector2 home, RectTransform version, RectTransform news,
+        Vector2 newsRestOffset, out float? fadeFloor)
     {
-        fadeFloor = null;
-        if (!IsCorner && !IsBar) return Vector2.zero;
+        float? floor = null;
         Transform parent = tips.parent;
         Bounds panel = BoundsIn(tips, parent);
         // Use the visible home position even while the panel is sliding offscreen.
         panel.center += (Vector3)(home - tips.anchoredPosition);
-        if (IsBar)
+        float x = 0f, y = 0f;
+        if (!IsBar)
         {
-            Bounds label = version != null ? BoundsIn(version, parent) : default;
-            bool overlap = version != null && panel.min.x < label.max.x && panel.max.x > label.min.x;
-            float barTop = BoundsIn(_rowArt, parent).max.y;
-            float shift = MenuLayout.TipsAboveBar(barTop, panel.min.y, panel.max.y, overlap, label.min.y, label.max.y);
-            fadeFloor = overlap && panel.max.y + shift > label.min.y ? label.max.y : barTop;
-            return new Vector2(0f, shift);
+            Bounds list = BoundsIn(IsCorner ? _buttons : _left, parent);
+            if (IsCorner) list.Encapsulate(BoundsIn((RectTransform)_quit.Root, parent));
+            x = MenuLayout.TipsSideShift(list.min.x, list.max.x, list.min.y, list.max.y,
+                panel.min.x, panel.max.x, panel.min.y, panel.max.y, Mirrored);
+            panel.center += new Vector3(x, 0f, 0f);
         }
-        Bounds list = BoundsIn(_buttons, parent);
-        list.Encapsulate(BoundsIn((RectTransform)_quit.Root, parent));
-        return new Vector2(MenuLayout.TipsRightShift(list.min.x, list.max.x, list.min.y, list.max.y,
-            panel.min.x, panel.max.x, panel.min.y, panel.max.y), 0f);
+        else
+        {
+            floor = BoundsIn(_rowArt, parent).max.y;
+            y = Mathf.Max(0f, floor.Value + 16f - panel.min.y);
+        }
+        if (version != null) Avoid(BoundsIn(version, parent));
+        if (news != null)
+        {
+            Bounds links = BoundsIn(news, parent);
+            links.center += (Vector3)newsRestOffset;
+            Avoid(links);
+        }
+        fadeFloor = floor;
+        return new Vector2(x, y);
+
+        void Avoid(Bounds other)
+        {
+            if (panel.min.x >= other.max.x || panel.max.x <= other.min.x) return;
+            y = MenuLayout.TipsAboveBar(float.NegativeInfinity, panel.min.y, panel.max.y, true,
+                other.min.y, other.max.y, y);
+            if (panel.min.y + y >= other.max.y && panel.min.y < other.max.y)
+                floor = Mathf.Max(floor ?? float.NegativeInfinity, other.max.y);
+        }
     }
 
     internal TMP_InputField Pilot => _name;
@@ -259,18 +282,19 @@ internal sealed class TitleMenuLayout
         var go = _snapshot.Own(new GameObject(caption, typeof(RectTransform)));
         go.transform.SetParent(parent, false);
         var heading = (RectTransform)go.transform;
-        var label = MakeLabel(caption, heading, 13f, TextAlignmentOptions.MidlineLeft);
+        var label = MakeLabel(caption, heading, 13f, Mirrored ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
         label.characterSpacing = 4f;
         label.color = HeadingColour;
         float textWidth = Mathf.Ceil(label.GetPreferredValues(caption).x);
         TitleMenu.Place(label.rectTransform, TopLeft, TopLeft, new Vector2(SideRail.TextInset, -gap),
-            new Vector2(textWidth, labelHeight));
+            new Vector2(textWidth, labelHeight), Mirrored);
         var rule = Paint("Heading rule", heading, new Color(1f, 1f, 1f, 0.14f));
         float ruleY = -gap - labelHeight * 0.5f;
         rule.anchorMin = TopLeft;
         rule.anchorMax = Vector2.one;
-        rule.offsetMin = new Vector2(SideRail.TextInset + textWidth + 10f, ruleY - 0.5f);
-        rule.offsetMax = new Vector2(0f, ruleY + 0.5f);
+        float inset = SideRail.TextInset + textWidth + 10f;
+        rule.offsetMin = new Vector2(Mirrored ? 0f : inset, ruleY - 0.5f);
+        rule.offsetMax = new Vector2(Mirrored ? -inset : 0f, ruleY + 0.5f);
         // The layout group's 2-unit spacing adds to the 4 units below the heading band.
         if (parent == _buttons)
         {
@@ -289,8 +313,9 @@ internal sealed class TitleMenuLayout
             var viewport = _name.textViewport;
             viewport.anchorMin = new Vector2(0f, viewport.anchorMin.y);
             viewport.anchorMax = new Vector2(1f, viewport.anchorMax.y);
-            viewport.offsetMin = new Vector2(IsCorner || IsBar ? 0f : 13f, viewport.offsetMin.y);
-            viewport.offsetMax = new Vector2(IsBar ? 0f : -10f, viewport.offsetMax.y);
+            float left = IsCorner || IsBar ? 0f : 13f, right = IsBar ? 0f : 10f;
+            viewport.offsetMin = new Vector2(Mirrored ? right : left, viewport.offsetMin.y);
+            viewport.offsetMax = new Vector2(-(Mirrored ? left : right), viewport.offsetMax.y);
         }
         StyleNameLabel(_name.textComponent);
         if (_name.placeholder is TMP_Text placeholder) StyleNameLabel(placeholder);
@@ -300,7 +325,7 @@ internal sealed class TitleMenuLayout
     {
         if (label == null) return;
         UseRailFont(label);
-        label.alignment = IsBar ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft;
+        label.alignment = PilotOnRight ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft;
         label.color = RowDim;
         label.fontSize = IsCorner ? 15f : 16f;
         label.enableAutoSizing = false;
@@ -313,6 +338,7 @@ internal sealed class TitleMenuLayout
 
     private Row Style(Transform root, Button button, int order, int index, string caption = null)
     {
+        float inset = IsCorner || IsBar ? 0f : caption == null ? SideRail.TextInset : 13f;
         var label = button.GetComponentInChildren<TMP_Text>(true);
         var legacy = label == null ? button.GetComponentInChildren<Text>(true) : null;
         button.transition = Selectable.Transition.None;
@@ -329,12 +355,13 @@ internal sealed class TitleMenuLayout
                 _snapshot.RememberCaption(label);
                 label.text = caption;
             }
-            label.horizontalAlignment = IsBar ? HorizontalAlignmentOptions.Center : HorizontalAlignmentOptions.Left;
+            label.horizontalAlignment = IsBar ? HorizontalAlignmentOptions.Center :
+                Mirrored ? HorizontalAlignmentOptions.Right : HorizontalAlignmentOptions.Left;
             label.verticalAlignment = VerticalAlignmentOptions.Middle;
             label.fontSize = IsBar ? 17f : IsCorner ? 18f : caption == null ? 19f : FooterFontSize;
             label.enableAutoSizing = false;
             label.characterSpacing = 2f;
-            label.margin = new Vector4(IsCorner || IsBar ? 0f : caption == null ? SideRail.TextInset : 13f, 0f, 0f, 0f);
+            label.margin = new Vector4(Mirrored ? 0f : inset, 0f, Mirrored ? inset : 0f, 0f);
             label.color = RowDim;
             label.fontStyle |= FontStyles.UpperCase;
             if (order == 0) label.fontStyle |= FontStyles.Bold;
@@ -350,10 +377,10 @@ internal sealed class TitleMenuLayout
         {
             _snapshot.RememberCaption(legacy);
             legacy.text = (caption ?? legacy.text).ToUpperInvariant();
-            legacy.alignment = IsBar ? TextAnchor.MiddleCenter : TextAnchor.MiddleLeft;
+            legacy.alignment = IsBar ? TextAnchor.MiddleCenter : Mirrored ? TextAnchor.MiddleRight : TextAnchor.MiddleLeft;
             legacy.fontSize = IsBar ? 17 : IsCorner ? 18 : caption == null ? 19 : FooterFontSize;
             legacy.color = RowDim;
-            StretchLabel(legacy.rectTransform, button.transform, IsCorner || IsBar ? 0f : caption == null ? SideRail.TextInset : 13f);
+            StretchLabel(legacy.rectTransform, button.transform, Mirrored ? 0f : inset, Mirrored ? inset : 0f);
             if (!IsBar) ShadowLabel(legacy);
         }
 
@@ -364,7 +391,8 @@ internal sealed class TitleMenuLayout
         float width = caption == null ? RowWidth : Mathf.Ceil(label != null ? label.GetPreferredValues(caption).x :
             legacy != null ? legacy.preferredWidth : 48f) + 26f;
         TitleMenu.Place(fill, Vector2.zero, new Vector2(0f, 0.5f), Vector2.zero,
-            new Vector2(width, IsBar ? BottomBar.Height : IsCorner ? 20f : caption == null ? SideRail.RowHeight : 37f));
+            new Vector2(width, IsBar ? BottomBar.Height : IsCorner ? 20f : caption == null ? SideRail.RowHeight : 37f),
+            Mirrored && !IsBar);
         CanvasGroup fillOpacity = null;
         if (!IsCorner)
         {
@@ -376,9 +404,10 @@ internal sealed class TitleMenuLayout
             fillOpacity.alpha = 0f;
         }
         var stripe = Paint("Accent", fill, _accent);
-        stripe.anchorMin = IsBar ? TopLeft : Vector2.zero;
-        stripe.anchorMax = IsBar ? Vector2.one : TopLeft;
-        stripe.pivot = new Vector2(0f, IsBar ? 1f : 0.5f);
+        float stripeSide = IsCorner && Mirrored ? 1f : 0f;
+        stripe.anchorMin = IsBar ? TopLeft : new Vector2(stripeSide, 0f);
+        stripe.anchorMax = IsBar ? Vector2.one : new Vector2(stripeSide, 1f);
+        stripe.pivot = new Vector2(stripeSide, IsBar ? 1f : 0.5f);
         stripe.anchoredPosition = Vector2.zero;
         stripe.sizeDelta = IsBar ? new Vector2(0f, 3f) : new Vector2(IsCorner ? 2f : 3f, 0f);
         var accentOpacity = stripe.gameObject.AddComponent<CanvasGroup>();
@@ -391,13 +420,13 @@ internal sealed class TitleMenuLayout
         };
     }
 
-    private static void StretchLabel(RectTransform label, Transform button, float left = 0f)
+    private static void StretchLabel(RectTransform label, Transform button, float left = 0f, float right = 0f)
     {
         if (label.parent != button) return;
         label.anchorMin = Vector2.zero;
         label.anchorMax = Vector2.one;
         label.offsetMin = new Vector2(left, 0f);
-        label.offsetMax = Vector2.zero;
+        label.offsetMax = new Vector2(-right, 0f);
     }
 
     internal bool RefreshRows()
@@ -527,7 +556,7 @@ internal sealed class TitleMenuLayout
     private void PlaceBarDivider(int index, float x, bool fromRight = false)
     {
         RectTransform divider = _barDividers[index];
-        BottomBar.PlaceDivider(divider, x, fromRight);
+        BottomBar.PlaceDivider(divider, x, fromRight, Mirrored);
         divider.gameObject.SetActive(true);
     }
 
@@ -557,13 +586,13 @@ internal sealed class TitleMenuLayout
         return Mathf.Ceil(row.LegacyLabel.preferredWidth) + 1f;
     }
 
-    private static float PlaceBarRow(Row row, MenuLayout.BarFit fit, float x, bool fromRight = false)
+    private float PlaceBarRow(Row row, MenuLayout.BarFit fit, float x, bool fromRight = false)
     {
         float textWidth = row.BarWidths[17 - fit.FontSize] * fit.WidthScale;
         float width = textWidth + 2f * fit.Padding;
         Vector2 anchor = fromRight ? BottomBar.BottomRight : Vector2.zero;
         var root = (RectTransform)row.Root;
-        TitleMenu.Place(root, anchor, anchor, new Vector2(x, 0f), new Vector2(width, BottomBar.Height));
+        TitleMenu.Place(root, anchor, anchor, new Vector2(x, 0f), new Vector2(width, BottomBar.Height), Mirrored);
         var button = (RectTransform)row.Button.transform;
         if (root != button) StretchLabel(button, root);
         if (row.Label != null)
@@ -748,7 +777,7 @@ internal sealed class TitleMenuLayout
             if (IsBar) reference.x = rect.rect.xMin;
             Vector3 centre = _rowArt.InverseTransformPoint(rect.TransformPoint(reference));
             float x = IsBar ? centre.x - _rowArt.rect.xMin : IsCorner ? MinimalCorner.Left - 10f : row == _quit ? 22f : 0f;
-            row.Fill.anchoredPosition = new Vector2(x, centre.y - _rowArt.rect.yMin);
+            row.Fill.anchoredPosition = new Vector2(MenuLayout.OffsetX(x, Mirrored && !IsBar), centre.y - _rowArt.rect.yMin);
         }
         Color colour = isHot || primary ? Bright : available ? RowDim : new Color(0.45f, 0.48f, 0.50f);
         if (row.Label != null && row.Label.color != colour) row.Label.color = colour;

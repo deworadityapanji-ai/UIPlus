@@ -11,23 +11,28 @@ internal sealed class MinimalCorner
     private static readonly Vector2 TopLeft = new(0f, 1f);
     private Texture2D _scrim;
     private readonly MenuSnapshot _snapshot;
+    private readonly bool _mirrored;
 
-    internal MinimalCorner(MenuSnapshot snapshot) => _snapshot = snapshot;
+    internal MinimalCorner(MenuSnapshot snapshot, bool mirrored)
+    {
+        _snapshot = snapshot;
+        _mirrored = mirrored;
+    }
 
     internal void PlaceList(RectTransform list) =>
         TitleMenu.Place(list, Vector2.zero, Vector2.zero,
-            new Vector2(Left, QuitBottom + RowHeight + MenuLayout.GroupGap), new Vector2(ListWidth, 0f));
+            new Vector2(Left, QuitBottom + RowHeight + MenuLayout.GroupGap), new Vector2(ListWidth, 0f), _mirrored);
 
     internal void PlaceQuit(RectTransform quit) =>
-        TitleMenu.Place(quit, Vector2.zero, Vector2.zero, new Vector2(Left, QuitBottom), new Vector2(ListWidth, RowHeight));
+        TitleMenu.Place(quit, Vector2.zero, Vector2.zero, new Vector2(Left, QuitBottom), new Vector2(ListWidth, RowHeight), _mirrored);
 
     internal void PlaceLogoAndPilot(RectTransform logo, RectTransform caption, RectTransform name, Vector2 railLogoSize)
     {
         Vector2 size = railLogoSize * 0.70f;
-        TitleMenu.Place(logo, TopLeft, TopLeft, new Vector2(Left, -44f), size);
+        TitleMenu.Place(logo, TopLeft, TopLeft, new Vector2(Left, -44f), size, _mirrored);
         float captionTop = 44f + size.y + 12f;
-        TitleMenu.Place(caption, TopLeft, TopLeft, new Vector2(Left, -captionTop), new Vector2(ListWidth, 18f));
-        TitleMenu.Place(name, TopLeft, TopLeft, new Vector2(Left, -captionTop - 18f), new Vector2(ListWidth, 30f));
+        TitleMenu.Place(caption, TopLeft, TopLeft, new Vector2(Left, -captionTop), new Vector2(ListWidth, 18f), _mirrored);
+        TitleMenu.Place(name, TopLeft, TopLeft, new Vector2(Left, -captionTop - 18f), new Vector2(ListWidth, 30f), _mirrored);
     }
 
     internal Transform GroupGap(Transform parent)
@@ -67,7 +72,8 @@ internal sealed class MinimalCorner
         var image = go.GetComponent<RawImage>();
         image.texture = _scrim;
         image.raycastTarget = false;
-        TitleMenu.Place(image.rectTransform, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(700f, 520f));
+        if (_mirrored) image.uvRect = new Rect(1f, 0f, -1f, 1f);
+        TitleMenu.Place(image.rectTransform, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(700f, 520f), _mirrored);
         return image.rectTransform;
     }
 

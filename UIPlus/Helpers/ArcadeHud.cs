@@ -44,7 +44,6 @@ internal static partial class ArcadeHud
     private const float GaugeHeight = 200f, GaugeGap = 18f;
     private const float TapeFillOffset = 5f, TapeFillWidth = 4f;
     private const float IconLong = 112f, IconShort = 52f, IconGap = 92f;
-    private static float TraySlot = 150f;   // largest width or height of one gauge in the tray
 
     // The HUD colour, sampled from a native readout when the HUD is built (falls back to pure green).
     private static Color Green = new(0f, 1f, 0f, 1f);
@@ -567,6 +566,8 @@ internal static partial class ArcadeHud
     private static readonly FieldInfo NozzleInput = typeof(NozzleGauge).GetField("inputPivot", TrayMember);
     private static readonly FieldInfo WingIcon = typeof(WingAngleGauge).GetField("wingIcon", TrayMember);
     private static readonly FieldInfo WingInput = typeof(WingAngleGauge).GetField("inputPivot", TrayMember);
+    private static readonly FieldInfo NozzleFade = typeof(NozzleGauge).GetField("fadeImages", TrayMember);
+    private static readonly FieldInfo WingFade = typeof(WingAngleGauge).GetField("fadeImages", TrayMember);
     private static readonly HashSet<string> MissingTrayPivots = new();
 
     private static RectTransform _vector;
@@ -614,7 +615,7 @@ internal static partial class ArcadeHud
     // What goes in the tray, right to left: nozzle, wing, the IR-signature ring of the game's
     // StatusGauges (some aircraft, including modded ones, put it in their HUD extras), then any
     // extra gauge types the user lists in ArcadeExtraGauges. Aim cues are never moved.
-    private static List<RectTransform> TrayNodes()
+    private static List<RectTransform> TrayNodes(Transform ir)
     {
         var nodes = new List<RectTransform>();
         void Add(Transform t) { if (t is RectTransform r && !nodes.Contains(r)) nodes.Add(r); }
@@ -624,7 +625,6 @@ internal static partial class ArcadeHud
         if (_plus && App<GearIndicator>() != null) Add(App<GearIndicator>().transform);
         if (_plus && App<AutopilotIndicator>() != null) Add(App<AutopilotIndicator>().transform);
         if (App<WingAngleGauge>() != null) Add(App<WingAngleGauge>().transform);
-        Transform ir = IrRing(App<StatusGauges>());
         if (ir != null) Add(ir);
         string extra = ExtraGauges != null ? ExtraGauges.Value : "";
         if (!string.IsNullOrWhiteSpace(extra))
@@ -639,8 +639,9 @@ internal static partial class ArcadeHud
     }
 
     // The IR ring is one of several parts of StatusGauges; take the smallest node that holds it.
-    private static Transform IrRing(StatusGauges gauges)
+    private static Transform IrRing(StatusGauges gauges, out Transform needle)
     {
+        needle = null;
         if (gauges == null) return null;
         object ring = AccessTools.Field(typeof(StatusGauges), "irLevelGauge")?.GetValue(gauges);
         if (ring == null) return null;
@@ -650,6 +651,7 @@ internal static partial class ArcadeHud
             object part = AccessTools.Field(ring.GetType(), field)?.GetValue(ring);
             Transform t = part is Component c ? c.transform : part as Transform;
             if (t == null) continue;
+            if (field == "needle") needle = t;
             common = common == null ? t : CommonParent(common, t);
         }
         // Never take the whole app (or anything above it): its other parts duplicate Arcade gauges.
@@ -663,39 +665,94 @@ internal static partial class ArcadeHud
         return null;
     }
 
-    private static Rect MeasureTrayNode(RectTransform node, Rect authored)
+    private static Rect MeasureTrayNode(RectTransform node, Rect authored, bool ir, Transform irNeedle)
     {
         var measurement = TrayMeasurements.GetValue(node, _ => new TrayMeasurement());
         if (measurement.Captured && HudTrayLayout.SameRect(measurement.Authored, authored)) return measurement.Bounds;
+        measurement.Bounds = RestTrayBounds(node, authored, ir, irNeedle);
         if (!measurement.Captured)
-        {
-            // Each game gauge animates its own pivots. Check their bindings for diagnostics
-            // without adding the rotating graphics to the layout footprint.
-            if (node.TryGetComponent(out NozzleGauge nozzle))
-            {
-                CheckTrayPivot(nozzle, NozzleIcon, "nozzleIcon", "nozzlePivot/nozzleIcon");
-                CheckTrayPivot(nozzle, NozzleInput, "inputPivot", "inputPivot");
-            }
-            else if (node.TryGetComponent(out WingAngleGauge wing))
-            {
-                CheckTrayPivot(wing, WingIcon, "wingIcon", "wingPivot/wingIcon");
-                CheckTrayPivot(wing, WingInput, "inputPivot", "inputPivot");
-            }
-            Plugin.Logger.LogInfo($"Arcade HUD tray: '{node.name}' authored rect {authored.width:F0}x{authored.height:F0}");
-        }
+            Plugin.Logger.LogInfo($"Arcade HUD tray: '{node.name}' rest footprint {measurement.Bounds.width:F1}x{measurement.Bounds.height:F1}");
         measurement.Captured = true;
         measurement.Authored = authored;
-        measurement.Bounds = HudTrayLayout.Measure(authored);
         return measurement.Bounds;
     }
 
-    private static void CheckTrayPivot(HUDApp app, FieldInfo field, string name, string childPath)
+    private static Rect RestTrayBounds(RectTransform node, Rect authored, bool ir, Transform irNeedle)
     {
-        if ((field?.GetValue(app) is Transform pivot && pivot != null) || app.transform.Find(childPath) != null ||
-            (childPath != name && app.transform.Find(name) != null)) return;
+        Transform icon = irNeedle, input = null;
+        float angle = 0f;
+        Image[] fadeImages = null;
+        bool vector = false;
+        bool gear = node.TryGetComponent<GearIndicator>(out _);
+        if (node.TryGetComponent(out NozzleGauge nozzle))
+        {
+            // Zero deflection and the forward command give the nozzle its level flight pose.
+            icon = TrayPivot(nozzle, NozzleIcon, "nozzleIcon", "nozzlePivot/nozzleIcon");
+            input = TrayPivot(nozzle, NozzleInput, "inputPivot", "inputPivot");
+            fadeImages = NozzleFade?.GetValue(nozzle) as Image[];
+            vector = true;
+        }
+        else if (node.TryGetComponent(out WingAngleGauge wing))
+        {
+            icon = TrayPivot(wing, WingIcon, "wingIcon", "wingPivot/wingIcon");
+            input = TrayPivot(wing, WingInput, "inputPivot", "inputPivot");
+            angle = _aircraft?.GetComponent<IWingAngleGauge>()?.GetLowerAngleLimit() ?? 0f;
+            fadeImages = WingFade?.GetValue(wing) as Image[];
+            vector = true;
+        }
+        // A mod-supplied app can animate any of its descendants. Only its root is a known footprint.
+        Rect fallback = HudTrayLayout.AuthoredFallback(authored);
+        if ((vector && (icon == null || input == null)) ||
+            (!vector && !ir && !gear && !node.TryGetComponent<AutopilotIndicator>(out _)))
+            return fallback;
+
+        Rect bounds = default;
+        bool hasBounds = false;
+        foreach (Graphic graphic in node.GetComponentsInChildren<Graphic>(true))
+        {
+            RectTransform piece = graphic.rectTransform;
+            Rect rect = piece.rect;
+            if (rect.width <= 0f || rect.height <= 0f || rect.width > 600f || rect.height > 600f) continue;
+            if (graphic is Image image)
+            {
+                // Filled arcs include empty space, and disabled pivot images are only helpers.
+                if (image.sprite == null || image.type == Image.Type.Filled) continue;
+                bool canAppear = !vector || (fadeImages != null && System.Array.IndexOf(fadeImages, image) >= 0);
+                if (!canAppear && (!image.enabled || image.color.a < 0.05f)) continue;
+            }
+            else if (!(graphic is TMP_Text) || (!vector && !ir)) continue;
+
+            // Use the label's authored box and evaluate pivots in reference pixels. This avoids
+            // reading the current text mesh or moving any visible transforms to measure them.
+            Matrix4x4 pose = Matrix4x4.identity;
+            for (Transform part = piece; part != node; part = part.parent)
+            {
+                Quaternion rotation = part == icon || part == input
+                    ? Quaternion.Euler(0f, 0f, angle) : part.localRotation;
+                pose = Matrix4x4.TRS(part.localPosition, rotation, part.localScale) * pose;
+            }
+            Vector2 a = pose.MultiplyPoint3x4(rect.min), b = pose.MultiplyPoint3x4(rect.max);
+            Vector2 c = pose.MultiplyPoint3x4(new Vector3(rect.xMin, rect.yMax));
+            Vector2 d = pose.MultiplyPoint3x4(new Vector3(rect.xMax, rect.yMin));
+            Vector2 lo = Vector2.Min(Vector2.Min(a, b), Vector2.Min(c, d));
+            Vector2 hi = Vector2.Max(Vector2.Max(a, b), Vector2.Max(c, d));
+            Rect footprint = new(lo, hi - lo);
+            bounds = hasBounds ? HudTrayLayout.Union(bounds, footprint) : footprint;
+            hasBounds = true;
+        }
+        return hasBounds ? bounds : fallback;
+    }
+
+    private static Transform TrayPivot(HUDApp app, FieldInfo field, string name, string childPath)
+    {
+        var pivot = field?.GetValue(app) as Transform;
+        if (pivot != null) return pivot;
+        pivot = app.transform.Find(childPath) ?? app.transform.Find(name);
+        if (pivot != null) return pivot;
         string member = $"{app.GetType().Name}.{name}";
         if (MissingTrayPivots.Add(member))
             Plugin.Logger.LogWarning($"Arcade HUD tray: {member} is missing. Using the authored gauge rect.");
+        return null;
     }
 
     private static void BorrowVectorGauges()
@@ -712,7 +769,8 @@ internal static partial class ArcadeHud
         Transform apNode = _plus ? App<AutopilotIndicator>()?.transform : null;
         RectTransform stackBase = null;
         float stackWidth = 0f, stackHeight = 0f, stackCentre = 0f, stackCentreX = 0f, stackCentreY = 0f;
-        foreach (RectTransform node in TrayNodes())
+        Transform ir = IrRing(App<StatusGauges>(), out Transform irNeedle);
+        foreach (RectTransform node in TrayNodes(ir))
         {
             bool isGear = gearNode != null && node == gearNode, isAp = apNode != null && node == apNode;
             var b = new Borrowed
@@ -723,8 +781,9 @@ internal static partial class ArcadeHud
                 SizeDelta = node.sizeDelta, AnchoredPosition = node.anchoredPosition,
                 AuthoredRect = node.rect,
             };
-            float slot = isGear || isAp ? TraySlot * 0.45f : TraySlot;   // stacked icons get half a slot each
-            var (bounds, scale) = HudTrayLayout.Fit(MeasureTrayNode(node, b.AuthoredRect), slot);
+            float slot = HudTrayLayout.Slot(_minimal, _thunder, isGear || isAp);
+            var (bounds, scale) = HudTrayLayout.Fit(MeasureTrayNode(node, b.AuthoredRect, node == ir,
+                node == ir ? irNeedle : null), slot);
             b.Footprint = bounds;
             node.SetParent(_vector, false);
             node.anchorMin = node.anchorMax = new Vector2(leftToRight ? 0f : 1f, 0.5f);
@@ -773,7 +832,7 @@ internal static partial class ArcadeHud
         FitStripToTray();
     }
 
-    // Authored gauge footprints in tray space, also used for the screen-edge clamp.
+    // Rest-pose footprints in tray space, also used for the screen-edge clamp.
     private static Vector2 _trayLo, _trayHi;
     private static bool _trayExtentValid;
 
@@ -884,7 +943,7 @@ internal static partial class ArcadeHud
         HiddenExtras.Clear();
         if (!hide) return;
         var toHide = new List<HUDApp> { App<GearIndicator>(), App<AutopilotIndicator>() };
-        if (IrRing(App<StatusGauges>()) != null) toHide.Add(App<StatusGauges>());
+        if (IrRing(App<StatusGauges>(), out _) != null) toHide.Add(App<StatusGauges>());
         foreach (HUDApp app in toHide)
         {
             if (app == null) continue;

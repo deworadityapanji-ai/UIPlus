@@ -2,20 +2,26 @@ using UnityEngine;
 using UIPlus.Helpers;
 using UIPlus.Menu;
 
-int checks = 0;
+int checks = 0, failures = 0;
+
+void Fail(string description)
+{
+    failures++;
+    Console.Error.WriteLine($"FAIL: {description}");
+}
 
 void Expect(bool actual, bool expected, string description)
 {
     checks++;
     if (actual != expected)
-        throw new Exception(description + $": expected {expected}, got {actual}");
+        Fail(description + $": expected {expected}, got {actual}");
 }
 
 void Near(float actual, float expected, string description)
 {
     checks++;
-    if (Math.Abs(actual - expected) > 0.00001f)
-        throw new Exception(description + $": expected {expected}, got {actual}");
+    if (!(Math.Abs(actual - expected) <= 0.00001f))
+        Fail(description + $": expected {expected}, got {actual}");
 }
 
 HudCameraView noseView = HudViewPolicy.Resolve(HudCameraView.Other, hudViewShowing: true);
@@ -53,18 +59,39 @@ Near(CapacitorReadout.Direction(CapacitorReadout.SmoothRate(chargeRate, 0f, 2f))
 Near(CapacitorReadout.Direction(-0.99f), 0f, "Small negative rates are hidden too");
 
 Rect nozzleRect = new(-50f, -50f, 100f, 100f);
-var (nozzleFootprint, nozzleScale) = HudTrayLayout.Fit(HudTrayLayout.Measure(nozzleRect), 150f);
-Near(nozzleScale, 1.5f, "The Vortex nozzle fits the same slot from its authored 100 by 100 rect");
-Near(nozzleFootprint.width, 150f, "The fitted nozzle width uses the authored extent");
-Near(nozzleFootprint.center.y, 0f, "The authored centre stays stationary throughout nozzle rotation");
+// Reference-pixel bounds from the stock Vortex and FastBomber1 HUD extras at their rest angles.
+Rect nozzleRest = HudTrayLayout.Union(nozzleRect, new Rect(-50.7f, -49.7f, 100f, 100f));
+nozzleRest = HudTrayLayout.Union(nozzleRest, new Rect(-45.2f, 55.8f, 87.025f, 15f));
+Rect wingRest = HudTrayLayout.Union(new Rect(-45.0f, -87.4f, 46.338718f, 185.34793f),
+    new Rect(-135.67834f, -92.11656f, 135.94834f, 103.97656f));
+foreach (var (style, strip, thunder, nozzleWidth, wingWidth, height) in new[]
+{
+    ("Arcade", false, false, 125.04f, 108.13f, 150f),
+    ("Wingman", false, false, 125.04f, 108.13f, 150f),
+    ("Plus", false, false, 125.04f, 108.13f, 150f),
+    ("Thunder", false, true, 108.37f, 93.72f, 130f),
+    ("Dashboard", true, false, 83.36f, 72.09f, 100f),
+    ("Analog", true, false, 83.36f, 72.09f, 100f),
+})
+{
+    float slot = HudTrayLayout.Slot(strip, thunder, stacked: false);
+    var (nozzleFootprint, _) = HudTrayLayout.Fit(nozzleRest, slot);
+    var (wingFootprint, _) = HudTrayLayout.Fit(wingRest, slot);
+    Near(MathF.Round(nozzleFootprint.width, 2), nozzleWidth, $"{style} restores the Vortex's fitted nozzle width");
+    Near(nozzleFootprint.height, height, $"{style} fits the entire nozzle and label within the slot");
+    Near(MathF.Round(wingFootprint.width, 2), wingWidth, $"{style} restores the FastBomber1's fitted wing gauge width");
+    Near(wingFootprint.height, height, $"{style} fits the wing gauge's rest pose within the slot");
+}
+Near(HudTrayLayout.Slot(false, false, stacked: true), 67.5f, "Plus keeps its smaller stacked gear and autopilot slots");
+Near(nozzleRest.center.y, 10.4f, "The label above the nozzle moves the centre of its fixed footprint");
 Expect(HudTrayLayout.SameRect(nozzleRect, new Rect(-50f, -50f, 100.0001f, 100f)), true,
     "Subpixel differences from reparenting do not invalidate a tray measurement");
 Expect(HudTrayLayout.SameRect(nozzleRect, new Rect(-60f, -50f, 120f, 100f)), false,
     "A real authored resize invalidates the tray measurement");
-var (offsetFootprint, _) = HudTrayLayout.Fit(HudTrayLayout.Measure(new Rect(0f, -20f, 200f, 80f)), 150f);
+var (offsetFootprint, _) = HudTrayLayout.Fit(HudTrayLayout.AuthoredFallback(new Rect(0f, -20f, 200f, 80f)), 150f);
 Near(offsetFootprint.center.x, 75f, "The tray accounts for a gauge whose authored pivot is at an edge");
 Near(offsetFootprint.height, 60f, "The tray preserves the aspect ratio of a non-square gauge");
-Near(HudTrayLayout.Measure(new Rect(0f, 0f, 0f, 0f)).width, 100f,
+Near(HudTrayLayout.AuthoredFallback(new Rect(0f, 0f, 0f, 0f)).width, 100f,
     "A transform-only gauge gets a predictable footprint");
 
 Expect(KillFeedFilter.Shows(KillFeedMode.All, KillFeedEvent.Kill, false, false, false), true,
@@ -153,6 +180,7 @@ Expect(petals.SequenceEqual(new[] { 8, 9, 0, 1, 2, 3, 4, 5 }), true,
     "Large loadouts retain the same selected-centred weapon window");
 
 Expect(MenuLayout.DefaultStyle == MenuStyle.BottomBar, true, "Bottom bar is the default title menu style");
+Expect(MenuLayout.DefaultSide == MenuSide.Left, true, "The main menu defaults to the left side");
 Expect(MenuLayout.DefaultTips == MenuTips.AutoHide, true, "The default tips mode is Auto Hide");
 Expect(MenuLayout.DefaultNews == MenuNews.Compact, true, "The default news mode is Compact");
 Expect(MenuLayout.DefaultLogo == MenuLogo.Shown, true, "The default logo mode is Shown");
@@ -184,6 +212,52 @@ foreach (MenuStyle to in Enum.GetValues<MenuStyle>())
         };
     Expect((built ?? MenuStyle.Vanilla) == to && MenuLayout.StyleChange(built, to, true) == MenuStyleChange.None, true,
         $"The transition from {from} to {to} settles after at most two frames");
+}
+
+Expect(MenuLayout.StyleChange(null, MenuStyle.Vanilla, true, MenuSide.Left, MenuSide.Right) == MenuStyleChange.None,
+    true, "Changing the menu side leaves Vanilla alone");
+foreach (var (style, inset, width) in new[]
+{
+    (MenuStyle.SideRail, 0f, 320f),
+    (MenuStyle.MinimalCorner, 44f, 290f),
+    (MenuStyle.BottomBar, 44f, 120f),
+})
+{
+    Expect(MenuLayout.StyleChange(style, style, false, MenuSide.Left, MenuSide.Right) == MenuStyleChange.None,
+        true, $"{style} waits until the settings modal closes before moving");
+    foreach (MenuSide side in Enum.GetValues<MenuSide>())
+    {
+        MenuSide other = side == MenuSide.Right ? MenuSide.Left : MenuSide.Right;
+        Expect(MenuLayout.StyleChange(style, style, true, other, side) == MenuStyleChange.Restore &&
+            MenuLayout.StyleChange(null, style, true, other, side) == MenuStyleChange.Build &&
+            MenuLayout.StyleChange(style, style, true, side, side) == MenuStyleChange.None,
+            true, $"{style} restores then builds live on the {side}");
+
+        bool right = side == MenuSide.Right;
+        const float canvas = 1920f;
+        float anchor = MenuLayout.AnchorX(0f, right), pivot = MenuLayout.AnchorX(0f, right);
+        float leftEdge = canvas * anchor + MenuLayout.OffsetX(inset, right) - width * pivot;
+        Near(leftEdge, right ? canvas - inset - width : inset, $"{style} keeps the inset from the {side} edge");
+        float footer = canvas * MenuLayout.AnchorX(1f, right) + MenuLayout.OffsetX(-35f, right);
+        Near(footer, right ? 35f : canvas - 35f, $"{style} mirrors its opposite-side footer anchor");
+
+        if (style == MenuStyle.BottomBar)
+        {
+            const int first = 1, quit = 5, end = 6;
+            Expect(MenuLayout.BarNeighbor(first, first, end, left: right, mirrored: right) == first + 1 &&
+                MenuLayout.BarNeighbor(first, first, end, left: !right, mirrored: right) == -1 &&
+                MenuLayout.BarNeighbor(quit, first, end, left: !right, mirrored: right) == quit - 1 &&
+                MenuLayout.BarNeighbor(quit, first, end, left: right, mirrored: right) == -1,
+                true, $"On the {side}, Bottom bar navigates inward from the first item toward Quit");
+        }
+        else
+        {
+            Expect(MenuLayout.NavigationIndex(1, 6, backwards: false) == 2 &&
+                MenuLayout.NavigationIndex(1, 6, backwards: right, mirrored: right) == 2 &&
+                MenuLayout.NavigationIndex(1, 6, backwards: !right, mirrored: right) == 0,
+                true, $"{style} on the {side} keeps top-to-bottom order and mirrors horizontal navigation");
+        }
+    }
 }
 
 // The video arrives while the logo is parented under the layout. Teardown first rescues
@@ -289,11 +363,14 @@ Near(MenuLayout.TipsAboveBar(72f, 145f, 205f, true, 82f, 119f), 0f, "Tips alread
 foreach (float height in new[] { 1080f, 1200f, 1440f })
 {
     float bottom = -height / 2f;
-    Near(MenuLayout.TipsRightShift(-916f, -626f, bottom + 90f, bottom + 510f,
+    Near(MenuLayout.TipsSideShift(-916f, -626f, bottom + 90f, bottom + 510f,
         -640f, 640f, bottom + 60f, bottom + 140f), 30f, "Overlapping tips move right with clearance");
-    Near(MenuLayout.TipsRightShift(-916f, -626f, bottom + 90f, bottom + 510f,
+    Near(MenuLayout.TipsSideShift(626f, 916f, bottom + 90f, bottom + 510f,
+        -640f, 640f, bottom + 60f, bottom + 140f, mirrored: true), -30f,
+        "Overlapping tips move left by the same clearance when the list is mirrored");
+    Near(MenuLayout.TipsSideShift(-916f, -626f, bottom + 90f, bottom + 510f,
         -600f, 600f, bottom + 60f, bottom + 140f), 0f, "Tips stay centred when horizontally clear");
-    Near(MenuLayout.TipsRightShift(-916f, -626f, bottom + 90f, bottom + 510f,
+    Near(MenuLayout.TipsSideShift(-916f, -626f, bottom + 90f, bottom + 510f,
         -640f, 640f, bottom + 20f, bottom + 80f), 0f, "Tips stay centred when below the last row");
 }
 
@@ -443,20 +520,13 @@ Expect(BackgroundPlayback.Fade(BackgroundTransition.FadeThroughBlack, 0.5f) == (
 Expect(BackgroundPlayback.Fade(BackgroundTransition.FadeThroughBlack, 0.75f) == (1f, 0.5f), true, "Black fades away over the incoming item");
 Expect(BackgroundPlayback.Fade(BackgroundTransition.FadeThroughBlack, 1.2f) == (1f, 0f), true, "Late frames finish the transition fully visible");
 
-checks++;
-if (HudAttachmentMigration.Parse("True", HudAttachment.Hidden) != HudAttachment.Aircraft) throw new Exception("Old visible HUD settings must stay aircraft-attached");
-checks++;
-if (HudAttachmentMigration.Parse("False", HudAttachment.Aircraft) != HudAttachment.Hidden) throw new Exception("Old hidden HUD settings must remain hidden");
-checks++;
-if (HudAttachmentMigration.Parse("Camera", HudAttachment.Aircraft) != HudAttachment.Camera) throw new Exception("Camera attachment must survive restart");
-checks++;
-if (HudAttachmentMigration.Parse("hidden", HudAttachment.Aircraft) != HudAttachment.Hidden) throw new Exception("HUD mode parsing is case insensitive");
-checks++;
-if (HudAttachmentMigration.Parse("99", HudAttachment.Aircraft) != HudAttachment.Aircraft) throw new Exception("Invalid numeric HUD modes must fall back safely");
-checks++;
-if (HudAttachmentMigration.Parse("bad", HudAttachment.Aircraft) != HudAttachment.Aircraft) throw new Exception("Invalid HUD settings must fall back safely");
-checks++;
-if (Enum.GetNames<HudAttachment>()[2] != "Hidden") throw new Exception("Hidden must be the last dropdown option");
+Expect(HudAttachmentMigration.Parse("True", HudAttachment.Hidden) == HudAttachment.Aircraft, true, "Old visible HUD settings must stay aircraft-attached");
+Expect(HudAttachmentMigration.Parse("False", HudAttachment.Aircraft) == HudAttachment.Hidden, true, "Old hidden HUD settings must remain hidden");
+Expect(HudAttachmentMigration.Parse("Camera", HudAttachment.Aircraft) == HudAttachment.Camera, true, "Camera attachment must survive restart");
+Expect(HudAttachmentMigration.Parse("hidden", HudAttachment.Aircraft) == HudAttachment.Hidden, true, "HUD mode parsing is case insensitive");
+Expect(HudAttachmentMigration.Parse("99", HudAttachment.Aircraft) == HudAttachment.Aircraft, true, "Invalid numeric HUD modes must fall back safely");
+Expect(HudAttachmentMigration.Parse("bad", HudAttachment.Aircraft) == HudAttachment.Aircraft, true, "Invalid HUD settings must fall back safely");
+Expect(Enum.GetNames<HudAttachment>().LastOrDefault() == "Hidden", true, "Hidden must be the last dropdown option");
 
 // HUD placement must be independent of the native HMD's screen-fixed readouts.
 Expect(HudLayoutMath.IsFlightInstrument(0), true, "Real HUD instruments participate in attachment");
@@ -643,4 +713,10 @@ Expect(HudCanvasMath.HasPositionDrift(scaledNeutral, scaledNeutral + Vector3.rig
 Expect(HudCanvasMath.HasPositionDrift(scaledNeutral, new Vector3(float.NaN, 0f, 0f)), true,
     "A nonfinite late-written widget position is detected for correction");
 
+if (failures > 0)
+{
+    Console.Error.WriteLine($"{failures} of {checks} checks failed.");
+    return 1;
+}
 Console.WriteLine($"PASS: {checks} HUD layout, attachment, canvas, targeting-screen, capacitor and title-menu checks.");
+return 0;

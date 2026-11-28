@@ -21,6 +21,7 @@ internal static class TitleMenuStart
     private static bool _watching, _reported;
     private static int _sceneHandle;
     private static MenuStyle _wanted;
+    private static MenuSide _wantedSide;
     private static float _reportAt;
 
     private static void Postfix(MainMenu __instance)
@@ -44,25 +45,27 @@ internal static class TitleMenuStart
     {
         Scene scene = SceneManager.GetActiveScene();
         MenuStyle style = MenuSettings.Style.Value;
+        MenuSide side = MenuSettings.Side.Value;
         if (scene.name != "MainMenu" || style == MenuStyle.Vanilla || GameManager.IsHeadless)
         {
             _watching = false;
             return;
         }
         float now = Time.unscaledTime;
-        if (!_watching || _sceneHandle != scene.handle || _wanted != style)
+        if (!_watching || _sceneHandle != scene.handle || _wanted != style || _wantedSide != side)
         {
             _watching = true;
             _reported = false;
             _sceneHandle = scene.handle;
             _wanted = style;
+            _wantedSide = side;
             _reportAt = now + 5f;
         }
         if (_reported || now < _reportAt) return;
         _reported = true;
         TitleMenu attached = _attached != null && _attached.gameObject.scene == scene ? _attached : null;
-        if (attached != null && attached.HasLayout(style)) return;
-        string reason = attached != null ? attached.StartupBlocker(style)
+        if (attached != null && attached.HasLayout(style, side)) return;
+        string reason = attached != null ? attached.StartupBlocker(style, side)
             : Chainloader.PluginInfos.ContainsKey(LayoutMod) ? $"layout compatibility skip ({LayoutMod})"
             : "TitleMenu component was not attached by MainMenu.Start";
         Plugin.Logger.LogInfo($"UI Plus title menu: {style} is still waiting after 5 s. {reason}.");
@@ -89,7 +92,8 @@ internal sealed class TitleMenu : MonoBehaviour
     private MenuSnapshot _snapshot;
     // A fresh (or restored) title screen has no installed custom layout.
     private MenuStyle? _built;
-    private MenuStyle? _rejected;
+    private MenuSide _builtSide;
+    private (MenuStyle Style, MenuSide Side)? _rejected;
     private Vector2 _lastMouse;
     private GameObject _lastHovered;
     private bool _blocked, _navigationDirty = true;
@@ -108,10 +112,12 @@ internal sealed class TitleMenu : MonoBehaviour
     {
         bool modal = FindOpenModal() != null;
         MenuStyle style = MenuSettings.Style?.Value ?? MenuLayout.DefaultStyle;
-        if (_rejected != style) _rejected = null;
-        bool ready = _built != style && _rejected != style && !modal && MainMenu.State == MainMenu.LoadingState.Loaded &&
+        MenuSide side = MenuSettings.Side?.Value ?? MenuLayout.DefaultSide;
+        if (_rejected != (style, side)) _rejected = null;
+        bool ready = (_built != style || _builtSide != side) && !_rejected.HasValue &&
+            !modal && MainMenu.State == MainMenu.LoadingState.Loaded &&
             GameManager.gameState == GameState.Menu && (_firstLoad == null || !_firstLoad.activeInHierarchy);
-        MenuStyleChange change = MenuLayout.StyleChange(_built, style, ready);
+        MenuStyleChange change = MenuLayout.StyleChange(_built, style, ready, _builtSide, side);
         if (change == MenuStyleChange.Restore)
         {
             RestoreLayout(captureLateRows: true);
@@ -123,13 +129,14 @@ internal sealed class TitleMenu : MonoBehaviour
         {
             try
             {
-                BuildLayout(style);
+                BuildLayout(style, side);
                 _built = style;
+                _builtSide = side;
             }
             catch (Exception error)
             {
                 RestoreLayout();
-                _rejected = style;
+                _rejected = (style, side);
                 Plugin.Logger.LogWarning($"UI Plus could not build {style} for the title menu. Restored Vanilla. {error}");
                 return;
             }
@@ -170,12 +177,12 @@ internal sealed class TitleMenu : MonoBehaviour
         _panels.Highlight(selected);
     }
 
-    internal bool HasLayout(MenuStyle style) => _built == style && _layout != null;
+    internal bool HasLayout(MenuStyle style, MenuSide side) => _built == style && _builtSide == side && _layout != null;
 
-    internal string StartupBlocker(MenuStyle style)
+    internal string StartupBlocker(MenuStyle style, MenuSide side)
     {
         if (!isActiveAndEnabled) return $"TitleMenu is inactive or disabled on '{gameObject.name}'";
-        if (_rejected == style) return "the build was rejected and Vanilla was restored";
+        if (_rejected == (style, side)) return "the build was rejected and Vanilla was restored";
         GameObject modal = FindOpenModal();
         if (modal != null) return $"modal '{modal.name}' is open";
         if (_firstLoad != null && _firstLoad.activeInHierarchy) return $"startup overlay '{_firstLoad.name}' is active";
@@ -230,7 +237,7 @@ internal sealed class TitleMenu : MonoBehaviour
         Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.Return) ||
         Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space);
 
-    private void BuildLayout(MenuStyle style)
+    private void BuildLayout(MenuStyle style, MenuSide side)
     {
         using var timing = new UiTiming("title layout build");
         var menu = GetComponent<MainMenu>();
@@ -256,7 +263,7 @@ internal sealed class TitleMenu : MonoBehaviour
         _snapshot.CaptureTree(news);
         _snapshot.CaptureTree(tips);
         _snapshot.Seal();
-        _layout = new TitleMenuLayout(_snapshot, style, left, container, buttons, quit, missions, name, logo);
+        _layout = new TitleMenuLayout(_snapshot, style, side, left, container, buttons, quit, missions, name, logo);
         // Keep the stock news panel clear of the horizontal hit areas when it is shown.
         float newsBottom = _layout.IsBar ? BottomBar.Height + 10f : 22f;
         _panels = new TitleMenuPanels(_snapshot, logo, news, tips, version, new Vector2(SideRail.Width + 22f, newsBottom), _layout);
@@ -362,10 +369,10 @@ internal sealed class TitleMenu : MonoBehaviour
         {
             // Hidden panels and unavailable buttons stay out of this chain.
             var links = new Navigation { mode = Navigation.Mode.Explicit };
-            links.selectOnUp = _navigation[(i + _navigation.Count - 1) % _navigation.Count];
-            links.selectOnDown = _navigation[(i + 1) % _navigation.Count];
-            links.selectOnLeft = links.selectOnUp;
-            links.selectOnRight = links.selectOnDown;
+            links.selectOnUp = _navigation[MenuLayout.NavigationIndex(i, _navigation.Count, backwards: true)];
+            links.selectOnDown = _navigation[MenuLayout.NavigationIndex(i, _navigation.Count, backwards: false)];
+            links.selectOnLeft = _navigation[MenuLayout.NavigationIndex(i, _navigation.Count, true, _layout.Mirrored)];
+            links.selectOnRight = _navigation[MenuLayout.NavigationIndex(i, _navigation.Count, false, _layout.Mirrored)];
             _navigation[i].navigation = links;
         }
         if (_layout.IsBar) LinkBottomNavigation();
@@ -378,18 +385,18 @@ internal sealed class TitleMenu : MonoBehaviour
         for (int i = _barStart; i < _barEnd; i++)
         {
             var nav = _navigation[i].navigation;
-            if (i > _barStart) nav.selectOnLeft = _navigation[i - 1];
-            else if (version != null) nav.selectOnLeft = version;
-            if (i + 1 < _barEnd) nav.selectOnRight = _navigation[i + 1];
-            else if (version != null) nav.selectOnRight = version;
+            int left = MenuLayout.BarNeighbor(i, _barStart, _barEnd, true, _layout.Mirrored);
+            int right = MenuLayout.BarNeighbor(i, _barStart, _barEnd, false, _layout.Mirrored);
+            nav.selectOnLeft = left >= 0 ? _navigation[left] : version ?? nav.selectOnLeft;
+            nav.selectOnRight = right >= 0 ? _navigation[right] : version ?? nav.selectOnRight;
             if (version != null) nav.selectOnUp = version;
             _navigation[i].navigation = nav;
         }
         if (version == null) return;
 
         var links = version.navigation;
-        links.selectOnLeft = _navigation[_barEnd - 1];
-        links.selectOnRight = _navigation[_barStart];
+        links.selectOnLeft = _navigation[_layout.Mirrored ? _barStart : _barEnd - 1];
+        links.selectOnRight = _navigation[_layout.Mirrored ? _barEnd - 1 : _barStart];
         if (_panels.FirstCompactLink is Button first) links.selectOnUp = first;
         else if (_barStart > 0) links.selectOnUp = _layout.Pilot;
         // A row may have gone away while focus was in the popup.
@@ -418,8 +425,11 @@ internal sealed class TitleMenu : MonoBehaviour
         }
     }
 
-    internal static void Place(RectTransform rect, Vector2 anchor, Vector2 pivot, Vector2 at, Vector2 size)
+    internal static void Place(RectTransform rect, Vector2 anchor, Vector2 pivot, Vector2 at, Vector2 size, bool mirrored = false)
     {
+        anchor.x = MenuLayout.AnchorX(anchor.x, mirrored);
+        pivot.x = MenuLayout.AnchorX(pivot.x, mirrored);
+        at.x = MenuLayout.OffsetX(at.x, mirrored);
         rect.anchorMin = rect.anchorMax = anchor;
         rect.pivot = pivot;
         rect.anchoredPosition = at;
