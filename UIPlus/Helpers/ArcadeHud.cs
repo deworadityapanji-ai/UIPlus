@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepInEx.Configuration;
 using HarmonyLib;
 using NuclearOption.UIStyleSystem;
@@ -138,19 +139,13 @@ internal static partial class ArcadeHud
         if (_root == null) return;
         _root.SetActive(true);
         _root.GetComponent<Canvas>().sortingOrder = flightCanvas.sortingOrder;
+        SyncNativeTray(hud);
         if (_plus) PusherStockHud.Restore();
         else PusherStockHud.Sync(aircraft, _hasPusher, hud.GetHUDCenter(), flightCanvas, cam.mainCamera);
         if (_plus) { MapDock = Vector2.zero; HideNativeRange(false); PlaceWeaponWheel(false); TickPlus(aircraft); return; }
         SyncNeutralQolFuel(_thunder);
         HideNativeWeaponPanel(true);
         if (HiddenExtras.Count == 0) HideExtras(true);
-        CheckBorrowedOwners();
-        // Aircraft without tray gauges: look again once a second, not every frame.
-        if (BorrowedGauges.Count == 0 && _vector != null && Time.unscaledTime >= _nextTrayLook)
-        {
-            _nextTrayLook = Time.unscaledTime + 1f;
-            if (TrayNodes().Count > 0) BorrowVectorGauges();
-        }
         UpdateSilhouette(aircraft);
         // Arcade and Wingman lay the RWR over the map, so it is centred on the aircraft there.
         // NuclearMinimap centres the map on the aircraft itself (and owns its orientation).
@@ -305,8 +300,6 @@ internal static partial class ArcadeHud
             // The game's nozzle / wing-sweep / tilt gauges, gathered beside its damage silhouette.
             _vector = Rect("GaugeTray", _root.transform, new Vector2(1f, 0f), new Vector2(1f, 0.5f),
                 VectorBase, new Vector2(140f, 110f));
-            BorrowVectorGauges();
-            FindNative(hud);
             _caution = MakeWarning("Caution", CautionBase);
             _pullUp = MakeWarning("PullUp", PullUpBase);
             BuildMessages();
@@ -396,7 +389,6 @@ internal static partial class ArcadeHud
         // Thunder writes the tags into its text block instead.
         if (_thunder) _status.gameObject.SetActive(false);
         if (_thunder) BuildDamageReport();
-        FindNative(hud);
         _caution = MakeWarning("Caution", CautionBase);
         _pullUp = MakeWarning("PullUp", PullUpBase);
         BuildMessages();
@@ -424,7 +416,6 @@ internal static partial class ArcadeHud
                 // Thunder's tray grows rightward from the silhouette; the others grow leftward.
                 _thunder ? new Vector2(0f, 0.5f) : new Vector2(1f, 0.5f),
                 VectorBase, new Vector2(140f, 110f));
-        BorrowVectorGauges();
         if (_wingman) ApplySlant();
     }
 
@@ -561,10 +552,64 @@ internal static partial class ArcadeHud
         internal Vector3 LocalPosition, LocalScale;
         internal Quaternion LocalRotation;
         internal Vector2 AnchorMin, AnchorMax, Pivot, SizeDelta, AnchoredPosition;
+        internal Rect AuthoredRect, Footprint;
     }
+
+    private sealed class TrayMeasurement
+    {
+        internal bool Captured;
+        internal Rect Authored, Bounds;
+    }
+
+    private static readonly ConditionalWeakTable<RectTransform, TrayMeasurement> TrayMeasurements = new();
+    private const BindingFlags TrayMember = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+    private static readonly FieldInfo NozzleIcon = typeof(NozzleGauge).GetField("nozzleIcon", TrayMember);
+    private static readonly FieldInfo NozzleInput = typeof(NozzleGauge).GetField("inputPivot", TrayMember);
+    private static readonly FieldInfo WingIcon = typeof(WingAngleGauge).GetField("wingIcon", TrayMember);
+    private static readonly FieldInfo WingInput = typeof(WingAngleGauge).GetField("inputPivot", TrayMember);
+    private static readonly HashSet<string> MissingTrayPivots = new();
 
     private static RectTransform _vector;
     private static readonly List<Borrowed> BorrowedGauges = new();
+    private static Transform _traySource;
+    private static HUDAppManager _trayManager;
+    private static int _traySourceChildren, _trayManagerChildren;
+    private static string _trayExtraTypes;
+    private static bool _trayNeedsScan = true;
+
+    [HarmonyPatch(typeof(HUDAppManager), "Start")]
+    private static class NativeTrayAppManagerStarted
+    {
+        // The manager has bound and styled its apps. LateUpdate can place them before render.
+        private static void Postfix() => _trayNeedsScan = true;
+    }
+
+    private static void SyncNativeTray(FlightHud hud)
+    {
+        if (_vector == null) return;
+        Transform source = hud.GetHUDCenter();
+        HUDAppManager manager = SceneSingleton<HUDAppManager>.i;
+        int sourceChildren = source != null ? source.childCount : 0;
+        int managerChildren = manager != null ? manager.transform.childCount : 0;
+        string extraTypes = ExtraGauges?.Value;
+        CheckBorrowedOwners();
+        if (!_trayNeedsScan && ReferenceEquals(source, _traySource) && ReferenceEquals(manager, _trayManager)
+            && sourceChildren == _traySourceChildren && managerChildren == _trayManagerChildren
+            && extraTypes == _trayExtraTypes)
+            return;
+
+        // Return existing gauges before scanning so a late nozzle can join a populated tray.
+        ReturnVectorGauges();
+        FindNative(source);
+        BorrowVectorGauges();
+        _traySource = source;
+        _trayManager = manager;
+        // Reparenting a gauge can itself change the child counts.
+        _traySourceChildren = source != null ? source.childCount : 0;
+        _trayManagerChildren = manager != null ? manager.transform.childCount : 0;
+        _trayExtraTypes = extraTypes;
+        _trayNeedsScan = false;
+    }
 
     // What goes in the tray, right to left: nozzle, wing, the IR-signature ring of the game's
     // StatusGauges (some aircraft, including modded ones, put it in their HUD extras), then any
@@ -618,6 +663,41 @@ internal static partial class ArcadeHud
         return null;
     }
 
+    private static Rect MeasureTrayNode(RectTransform node, Rect authored)
+    {
+        var measurement = TrayMeasurements.GetValue(node, _ => new TrayMeasurement());
+        if (measurement.Captured && HudTrayLayout.SameRect(measurement.Authored, authored)) return measurement.Bounds;
+        if (!measurement.Captured)
+        {
+            // Each game gauge animates its own pivots. Check their bindings for diagnostics
+            // without adding the rotating graphics to the layout footprint.
+            if (node.TryGetComponent(out NozzleGauge nozzle))
+            {
+                CheckTrayPivot(nozzle, NozzleIcon, "nozzleIcon", "nozzlePivot/nozzleIcon");
+                CheckTrayPivot(nozzle, NozzleInput, "inputPivot", "inputPivot");
+            }
+            else if (node.TryGetComponent(out WingAngleGauge wing))
+            {
+                CheckTrayPivot(wing, WingIcon, "wingIcon", "wingPivot/wingIcon");
+                CheckTrayPivot(wing, WingInput, "inputPivot", "inputPivot");
+            }
+            Plugin.Logger.LogInfo($"Arcade HUD tray: '{node.name}' authored rect {authored.width:F0}x{authored.height:F0}");
+        }
+        measurement.Captured = true;
+        measurement.Authored = authored;
+        measurement.Bounds = HudTrayLayout.Measure(authored);
+        return measurement.Bounds;
+    }
+
+    private static void CheckTrayPivot(HUDApp app, FieldInfo field, string name, string childPath)
+    {
+        if ((field?.GetValue(app) is Transform pivot && pivot != null) || app.transform.Find(childPath) != null ||
+            (childPath != name && app.transform.Find(name) != null)) return;
+        string member = $"{app.GetType().Name}.{name}";
+        if (MissingTrayPivots.Add(member))
+            Plugin.Logger.LogWarning($"Arcade HUD tray: {member} is missing. Using the authored gauge rect.");
+    }
+
     private static void BorrowVectorGauges()
     {
         const float gap = 18f;
@@ -641,37 +721,20 @@ internal static partial class ArcadeHud
                 LocalPosition = node.localPosition, LocalScale = node.localScale, LocalRotation = node.localRotation,
                 AnchorMin = node.anchorMin, AnchorMax = node.anchorMax, Pivot = node.pivot,
                 SizeDelta = node.sizeDelta, AnchoredPosition = node.anchoredPosition,
+                AuthoredRect = node.rect,
             };
-            Vector2 size = node.rect.size;
-            float ratio = Mathf.Clamp(node.lossyScale.x / Mathf.Max(0.0001f, _vector.lossyScale.x), 0.1f, 10f);
+            float slot = isGear || isAp ? TraySlot * 0.45f : TraySlot;   // stacked icons get half a slot each
+            var (bounds, scale) = HudTrayLayout.Fit(MeasureTrayNode(node, b.AuthoredRect), slot);
+            b.Footprint = bounds;
             node.SetParent(_vector, false);
             node.anchorMin = node.anchorMax = new Vector2(leftToRight ? 0f : 1f, 0.5f);
-            node.sizeDelta = size;
+            node.sizeDelta = b.AuthoredRect.size;
             node.localRotation = Quaternion.identity;
-            node.localScale = Vector3.one * ratio;
-            node.anchoredPosition = Vector2.zero;
-            // Measure what it actually draws, then line it up right-to-left, vertically centred.
-            DrawnBounds(node, out Vector2 lo, out Vector2 hi);
-            float width = Mathf.Abs(hi.x - lo.x), height = Mathf.Abs(hi.y - lo.y);
-            // Aircraft draw these gauges at very different sizes (a swing-wing gauge can be three
-            // times a nozzle gauge). Shrink anything larger than one tray slot, keeping its shape,
-            // so the tray has the same footprint on every aircraft; smaller gauges stay as they are.
-            // Never below half size, so a mismeasured gauge stays readable.
-            // Small gauges are enlarged (up to 1.6x) so a lone nozzle gauge reads clearly.
-            float slot = isGear || isAp ? TraySlot * 0.45f : TraySlot;   // stacked icons get half a slot each
-            float fit = Mathf.Clamp(slot / Mathf.Max(1f, Mathf.Max(width, height)), 0.5f, 1.6f);
-            Plugin.Logger.LogInfo($"Arcade HUD tray: '{node.name}' draws {width:F0}x{height:F0} (largest piece '{_largestName}'), scale {fit:F2}");
-            if (Mathf.Abs(fit - 1f) > 0.001f)
-            {
-                node.localScale *= fit;
-                DrawnBounds(node, out lo, out hi);
-                width = Mathf.Abs(hi.x - lo.x);
-                height = Mathf.Abs(hi.y - lo.y);
-            }
-            float centreX = (lo.x + hi.x) * 0.5f, centreY = (lo.y + hi.y) * 0.5f;
-            // Vertically, centre what the gauge can reach as its icons swing, not just its pose now.
-            DrawnBounds(node, out Vector2 sweepLo, out Vector2 sweepHi, includeSweep: true);
-            centreY = (sweepLo.y + sweepHi.y) * 0.5f;
+            // Work in tray reference pixels. The previous canvas's scale can still be
+            // settling when a HUD rebuilds, and should not change a gauge's fitted size.
+            node.localScale = Vector3.one * scale;
+            float width = bounds.width, height = bounds.height;
+            float centreX = bounds.center.x, centreY = bounds.center.y;
             if (isAp && stackBase != null)
             {
                 // Above the gear indicator, the pair centred vertically as one column.
@@ -698,9 +761,11 @@ internal static partial class ArcadeHud
         }
         if (BorrowedGauges.Count > 0) _vector.sizeDelta = new Vector2(Mathf.Abs(cursor) - gap, Mathf.Max(tallest, 40f));
         _trayExtentValid = false;
+        Rect tray = _vector.rect;
         foreach (Borrowed b in BorrowedGauges)
         {
-            DrawnBounds(b.Node, out Vector2 lo, out Vector2 hi, includeSweep: true);
+            Vector2 origin = tray.min + Vector2.Scale(tray.size, b.Node.anchorMin) + b.Node.anchoredPosition;
+            Vector2 lo = origin + b.Footprint.min, hi = origin + b.Footprint.max;
             _trayLo = _trayExtentValid ? Vector2.Min(_trayLo, lo) : lo;
             _trayHi = _trayExtentValid ? Vector2.Max(_trayHi, hi) : hi;
             _trayExtentValid = true;
@@ -708,11 +773,7 @@ internal static partial class ArcadeHud
         FitStripToTray();
     }
 
-    // The area a gauge really draws, in the tray's space: its own rect plus every visible graphic
-    // under it (the IR ring's parts, for example, reach well outside their parent's rect).
-    private static float _largestArea;
-    private static string _largestName = "";
-    // Everything the tray can draw (gauges, labels, swinging icons), in the tray's own space.
+    // Authored gauge footprints in tray space, also used for the screen-edge clamp.
     private static Vector2 _trayLo, _trayHi;
     private static bool _trayExtentValid;
 
@@ -734,88 +795,11 @@ internal static partial class ArcadeHud
         if (shift != Vector2.zero) _vector.anchoredPosition += shift;
     }
 
-    // Reused every frame by DrawnBounds (it runs per frame while the tray is kept on screen).
-    private static readonly List<Graphic> BoundsGraphics = new();
-    private static readonly Vector3[] BoundsCorners = new Vector3[4];
-    private static float _nextTrayLook;
-
-    private static void DrawnBounds(RectTransform node, out Vector2 lo, out Vector2 hi, bool includeSweep = false)
-    {
-        _largestArea = 0f;
-        _largestName = "";
-        Vector2 min = new(float.MaxValue, float.MaxValue), max = new(float.MinValue, float.MinValue);
-        Vector3[] c = BoundsCorners;
-        void Add(RectTransform r)
-        {
-            r.GetWorldCorners(c);
-            foreach (Vector3 p in c)
-            {
-                Vector2 local = _vector.InverseTransformPoint(p);
-                min = Vector2.Min(min, local);
-                max = Vector2.Max(max, local);
-            }
-        }
-        // Only pieces that actually draw something: visible colour, and a sprite or real text.
-        // Partly drawn ("filled") images are skipped: a swing-wing gauge's arc is a 430px ring of
-        // which only a slice shows, so its frame says nothing about the visible size.
-        // Gauges carry invisible helpers (transparent images, large hit areas) that would make
-        // them measure far bigger than they look. The node's own rect is used only as a fallback.
-        bool any = false;
-        node.GetComponentsInChildren(false, BoundsGraphics);
-        foreach (Graphic g in BoundsGraphics)
-        {
-            if (!g.enabled || g.color.a < 0.05f) continue;
-            if (g is Image image && (image.sprite == null || image.type == Image.Type.Filled)) continue;
-            if (g is TMP_Text text && string.IsNullOrWhiteSpace(text.text)) continue;
-            Vector2 size = g.rectTransform.rect.size;
-            if (size.x > 600f || size.y > 600f) continue;
-            Add(g.rectTransform);
-            if (g is TMP_Text drawn && drawn.textInfo != null && drawn.textInfo.characterCount > 0)
-            {
-                // Text can overflow its box (a long "NOZZLE 90°" label); include what it renders.
-                Bounds tb = drawn.textBounds;
-                foreach (Vector3 corner in new[] { tb.min, tb.max, new Vector3(tb.min.x, tb.max.y), new Vector3(tb.max.x, tb.min.y) })
-                {
-                    Vector2 local = _vector.InverseTransformPoint(drawn.rectTransform.TransformPoint(corner));
-                    min = Vector2.Min(min, local);
-                    max = Vector2.Max(max, local);
-                }
-            }
-            any = true;
-            float area = size.x * size.y;
-            if (area > _largestArea) { _largestArea = area; _largestName = g.name + $" {size.x:F0}x{size.y:F0}"; }
-        }
-        if (!any) Add(node);
-        // Optionally include the whole sweep of icons that rotate (nozzle and wing icons, the input
-        // pivot): a square around each pivot, as wide as its furthest visible point. Used only to
-        // place a gauge vertically, so a nozzle turned to 90 degrees still stays in its slot.
-        HUDApp app = includeSweep ? node.GetComponent<HUDApp>() : null;
-        if (app != null)
-            foreach (string field in new[] { "nozzleIcon", "wingIcon", "inputPivot" })
-            {
-                if (!(AccessTools.Field(app.GetType(), field)?.GetValue(app) is Transform pivot)) continue;
-                float reach = 0f;
-                foreach (Graphic g in pivot.GetComponentsInChildren<Graphic>(false))
-                {
-                    if (!g.enabled || g.color.a < 0.05f) continue;
-                    if (g is Image image && (image.sprite == null || image.type == Image.Type.Filled)) continue;
-                    g.rectTransform.GetWorldCorners(c);
-                    foreach (Vector3 p in c) reach = Mathf.Max(reach, Vector3.Distance(p, pivot.position));
-                }
-                if (reach <= 0f) continue;
-                Vector2 centre = _vector.InverseTransformPoint(pivot.position);
-                float r = reach / Mathf.Max(0.0001f, _vector.lossyScale.x);
-                min = Vector2.Min(min, centre - new Vector2(r, r));
-                max = Vector2.Max(max, centre + new Vector2(r, r));
-            }
-        lo = min;
-        hi = max;
-    }
-
     // Put the gauges back where the game had them. If the aircraft's HUD extras are gone (the
     // aircraft was destroyed), the gauge would otherwise outlive it on our canvas, so destroy it.
     private static void ReturnVectorGauges()
     {
+        _trayNeedsScan = true;
         foreach (Borrowed b in BorrowedGauges)
         {
             if (b.Node == null) continue;
@@ -823,6 +807,13 @@ internal static partial class ArcadeHud
             {
                 Object.Destroy(b.Node.gameObject);
                 continue;
+            }
+            // Preserve a real resize that happened while the node was in the tray.
+            Rect current = b.Node.rect;
+            if (!HudTrayLayout.SameRect(current, b.AuthoredRect))
+            {
+                b.SizeDelta += current.size - b.AuthoredRect.size;
+                b.Pivot = b.Node.pivot;
             }
             b.Node.SetParent(b.Parent, false);
             b.Node.anchorMin = b.AnchorMin;
@@ -836,6 +827,7 @@ internal static partial class ArcadeHud
             b.Node.SetSiblingIndex(Mathf.Min(b.Sibling, b.Parent.childCount - 1));
         }
         BorrowedGauges.Clear();
+        _trayExtentValid = false;
         FitStripToTray();
     }
 
@@ -844,9 +836,14 @@ internal static partial class ArcadeHud
         for (int i = BorrowedGauges.Count - 1; i >= 0; i--)
         {
             Borrowed b = BorrowedGauges[i];
-            if (b.Parent != null && b.Node != null) continue;
+            if (b.Parent != null && b.Node != null)
+            {
+                if (!HudTrayLayout.SameRect(b.Node.rect, b.AuthoredRect)) _trayNeedsScan = true;
+                continue;
+            }
             if (b.Node != null) Object.Destroy(b.Node.gameObject);
             BorrowedGauges.RemoveAt(i);
+            _trayNeedsScan = true;
         }
     }
 
@@ -857,10 +854,9 @@ internal static partial class ArcadeHud
     private static readonly Dictionary<System.Type, HUDApp> Native = new();
     private static readonly List<(CanvasGroup group, bool owned)> HiddenExtras = new();
 
-    private static void FindNative(FlightHud hud)
+    private static void FindNative(Transform centre)
     {
         Native.Clear();
-        Transform centre = hud.GetHUDCenter();
         if (centre == null) return;
         // Only the flight HUD's own apps (helmet duplicates live elsewhere, under HMDCenter).
         foreach (HUDApp app in centre.GetComponentsInChildren<HUDApp>(true))

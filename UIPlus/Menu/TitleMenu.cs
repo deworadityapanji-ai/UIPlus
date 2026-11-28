@@ -7,6 +7,7 @@ using NuclearOption.UIStyleSystem;
 using UIPlus.Helpers;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace UIPlus.Menu;
@@ -14,23 +15,57 @@ namespace UIPlus.Menu;
 [HarmonyPatch(typeof(MainMenu), "Start")]
 internal static class TitleMenuStart
 {
+    private const string LayoutMod = "com.newmenulayout";
     private static bool _loggedConflict;
+    private static TitleMenu _attached;
+    private static bool _watching, _reported;
+    private static int _sceneHandle;
+    private static MenuStyle _wanted;
+    private static float _reportAt;
 
     private static void Postfix(MainMenu __instance)
     {
         if (__instance.gameObject.scene.name != "MainMenu") return;
         // MainMenu Replacer only swaps the background, so the layout still applies alongside it.
-        const string layoutMod = "com.newmenulayout";
-        if (Chainloader.PluginInfos.ContainsKey(layoutMod))
+        if (Chainloader.PluginInfos.ContainsKey(LayoutMod))
         {
             if (!_loggedConflict)
             {
                 _loggedConflict = true;
-                Plugin.Logger.LogInfo($"UI Plus is leaving the title menu layout to {layoutMod}.");
+                Plugin.Logger.LogInfo($"UI Plus is leaving the title menu layout to {LayoutMod}.");
             }
             return;
         }
-        __instance.gameObject.AddComponent<TitleMenu>();
+        _attached = __instance.GetComponent<TitleMenu>() ?? __instance.gameObject.AddComponent<TitleMenu>();
+    }
+
+    // Runs from the plugin, so an inactive menu or a skipped Start is diagnosable too.
+    internal static void CheckStartup()
+    {
+        Scene scene = SceneManager.GetActiveScene();
+        MenuStyle style = MenuSettings.Style.Value;
+        if (scene.name != "MainMenu" || style == MenuStyle.Vanilla || GameManager.IsHeadless)
+        {
+            _watching = false;
+            return;
+        }
+        float now = Time.unscaledTime;
+        if (!_watching || _sceneHandle != scene.handle || _wanted != style)
+        {
+            _watching = true;
+            _reported = false;
+            _sceneHandle = scene.handle;
+            _wanted = style;
+            _reportAt = now + 5f;
+        }
+        if (_reported || now < _reportAt) return;
+        _reported = true;
+        TitleMenu attached = _attached != null && _attached.gameObject.scene == scene ? _attached : null;
+        if (attached != null && attached.HasLayout(style)) return;
+        string reason = attached != null ? attached.StartupBlocker(style)
+            : Chainloader.PluginInfos.ContainsKey(LayoutMod) ? $"layout compatibility skip ({LayoutMod})"
+            : "TitleMenu component was not attached by MainMenu.Start";
+        Plugin.Logger.LogInfo($"UI Plus title menu: {style} is still waiting after 5 s. {reason}.");
     }
 }
 
@@ -52,7 +87,8 @@ internal sealed class TitleMenu : MonoBehaviour
     private TitleMenuLayout _layout;
     private TitleMenuPanels _panels;
     private MenuSnapshot _snapshot;
-    private MenuStyle _built = MenuLayout.DefaultStyle;
+    // A fresh (or restored) title screen has no installed custom layout.
+    private MenuStyle? _built;
     private MenuStyle? _rejected;
     private Vector2 _lastMouse;
     private GameObject _lastHovered;
@@ -70,7 +106,7 @@ internal sealed class TitleMenu : MonoBehaviour
 
     private void LateUpdate()
     {
-        bool modal = ModalOpen();
+        bool modal = FindOpenModal() != null;
         MenuStyle style = MenuSettings.Style?.Value ?? MenuLayout.DefaultStyle;
         if (_rejected != style) _rejected = null;
         bool ready = _built != style && _rejected != style && !modal && MainMenu.State == MainMenu.LoadingState.Loaded &&
@@ -132,6 +168,21 @@ internal sealed class TitleMenu : MonoBehaviour
         if (_layout.IsBar && selected != null) RememberBarItem(selected);
         _layout.Highlight(selected);
         _panels.Highlight(selected);
+    }
+
+    internal bool HasLayout(MenuStyle style) => _built == style && _layout != null;
+
+    internal string StartupBlocker(MenuStyle style)
+    {
+        if (!isActiveAndEnabled) return $"TitleMenu is inactive or disabled on '{gameObject.name}'";
+        if (_rejected == style) return "the build was rejected and Vanilla was restored";
+        GameObject modal = FindOpenModal();
+        if (modal != null) return $"modal '{modal.name}' is open";
+        if (_firstLoad != null && _firstLoad.activeInHierarchy) return $"startup overlay '{_firstLoad.name}' is active";
+        var state = MainMenu.State;
+        if (state != MainMenu.LoadingState.Loaded) return $"MainMenu.State is {state}";
+        if (GameManager.gameState != GameState.Menu) return $"GameManager.gameState is {GameManager.gameState}";
+        return $"layout is not installed (current layout: {_built?.ToString() ?? "stock"})";
     }
 
     private void UpdateFocus(EventSystem events, Vector2 mouse, bool mouseMoved, bool firstFrame,
@@ -235,7 +286,7 @@ internal sealed class TitleMenu : MonoBehaviour
     private void RestoreLayout(bool captureLateRows = false)
     {
         using var timing = new UiTiming("title layout restore");
-        if (captureLateRows) _layout.RefreshRows(); // Capture buttons injected since the last update.
+        if (captureLateRows) _layout?.RefreshRows(); // Capture buttons injected since the last update.
         ThemeManager.ThemeGroupChanged -= OnThemeChanged;
         var events = EventSystem.current;
         if (events != null && (_snapshot?.Owns(events.currentSelectedGameObject) == true ||
@@ -248,7 +299,7 @@ internal sealed class TitleMenu : MonoBehaviour
         _snapshot = null;
         _layout = null;
         _panels = null;
-        _built = MenuLayout.DefaultStyle;
+        _built = null;
         _navigation.Clear();
         _barStart = _barEnd = 0;
         _lastBarItem = null;
@@ -284,12 +335,17 @@ internal sealed class TitleMenu : MonoBehaviour
         _panels.SetAccent(accent);
     }
 
-    private bool ModalOpen()
+    private GameObject FindOpenModal()
     {
-        if (_overlay != null && _overlay.childCount > 0) return true;
+        if (_overlay != null)
+            for (int i = 0; i < _overlay.childCount; i++)
+            {
+                GameObject overlay = _overlay.GetChild(i).gameObject;
+                if (overlay.activeInHierarchy) return overlay;
+            }
         foreach (GameObject modal in _modals)
-            if (modal != null && modal.activeInHierarchy) return true;
-        return false;
+            if (modal != null && modal.activeInHierarchy) return modal;
+        return null;
     }
 
     private bool OwnsFocus(GameObject selected) => selected != null &&

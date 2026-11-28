@@ -18,6 +18,7 @@
     <Compile Include="../../UIPlus/Helpers/HudLayoutMath.cs" Link="HudLayoutMath.cs" />
     <Compile Include="../../UIPlus/Helpers/HudCanvasMath.cs" Link="HudCanvasMath.cs" />
     <Compile Include="../../UIPlus/Helpers/HudLayoutStamp.cs" Link="HudLayoutStamp.cs" />
+    <Compile Include="../../UIPlus/Helpers/HudTrayLayout.cs" Link="HudTrayLayout.cs" />
     <Compile Include="../../UIPlus/Helpers/TargetingScreenLayout.cs" Link="TargetingScreenLayout.cs" />
     <Compile Include="../../UIPlus/Helpers/TargetingFeedReadiness.cs" Link="TargetingFeedReadiness.cs" />
     <Reference Include="UnityEngine.CoreModule">

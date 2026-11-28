@@ -48,10 +48,10 @@ internal static class MenuLayout
         return new BarFit(15, 10f, text15 <= textSpace ? 1f : textSpace / text15);
     }
 
-    internal static MenuStyleChange StyleChange(MenuStyle built, MenuStyle wanted, bool ready)
+    internal static MenuStyleChange StyleChange(MenuStyle? built, MenuStyle wanted, bool ready)
     {
-        if (!ready || built == wanted) return MenuStyleChange.None;
-        return built == MenuStyle.Vanilla ? MenuStyleChange.Build : MenuStyleChange.Restore;
+        if (!ready || (built ?? MenuStyle.Vanilla) == wanted) return MenuStyleChange.None;
+        return built.HasValue ? MenuStyleChange.Restore : MenuStyleChange.Build;
     }
 
     internal static int IndexBefore(int current, int next, int count) =>

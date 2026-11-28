@@ -151,6 +151,7 @@ public class Plugin : BaseUnityPlugin
         HudLayoutEditor.Update();
         HudHide.Poll();
         ArcadeCamBridge.TryConnect();
+        TitleMenuStart.CheckStartup();
     }
 
     private void LateUpdate() => HudLayoutEditor.RefreshCursor();

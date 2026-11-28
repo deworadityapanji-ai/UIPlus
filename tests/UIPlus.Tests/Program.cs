@@ -52,6 +52,21 @@ Near(CapacitorReadout.Direction(CapacitorReadout.SmoothRate(chargeRate, -15f, 0.
 Near(CapacitorReadout.Direction(CapacitorReadout.SmoothRate(chargeRate, 0f, 2f)), 0f, "The indicator fades out once the capacitor stops changing");
 Near(CapacitorReadout.Direction(-0.99f), 0f, "Small negative rates are hidden too");
 
+Rect nozzleRect = new(-50f, -50f, 100f, 100f);
+var (nozzleFootprint, nozzleScale) = HudTrayLayout.Fit(HudTrayLayout.Measure(nozzleRect), 150f);
+Near(nozzleScale, 1.5f, "The Vortex nozzle fits the same slot from its authored 100 by 100 rect");
+Near(nozzleFootprint.width, 150f, "The fitted nozzle width uses the authored extent");
+Near(nozzleFootprint.center.y, 0f, "The authored centre stays stationary throughout nozzle rotation");
+Expect(HudTrayLayout.SameRect(nozzleRect, new Rect(-50f, -50f, 100.0001f, 100f)), true,
+    "Subpixel differences from reparenting do not invalidate a tray measurement");
+Expect(HudTrayLayout.SameRect(nozzleRect, new Rect(-60f, -50f, 120f, 100f)), false,
+    "A real authored resize invalidates the tray measurement");
+var (offsetFootprint, _) = HudTrayLayout.Fit(HudTrayLayout.Measure(new Rect(0f, -20f, 200f, 80f)), 150f);
+Near(offsetFootprint.center.x, 75f, "The tray accounts for a gauge whose authored pivot is at an edge");
+Near(offsetFootprint.height, 60f, "The tray preserves the aspect ratio of a non-square gauge");
+Near(HudTrayLayout.Measure(new Rect(0f, 0f, 0f, 0f)).width, 100f,
+    "A transform-only gauge gets a predictable footprint");
+
 Expect(KillFeedFilter.Shows(KillFeedMode.All, KillFeedEvent.Kill, false, false, false), true,
     "The extra switches do not suppress ordinary kills");
 Expect(KillFeedFilter.Shows(KillFeedMode.Mine, KillFeedEvent.Kill, false, true, true), false,
@@ -142,7 +157,13 @@ Expect(MenuLayout.DefaultTips == MenuTips.AutoHide, true, "The default tips mode
 Expect(MenuLayout.DefaultNews == MenuNews.Compact, true, "The default news mode is Compact");
 Expect(MenuLayout.DefaultLogo == MenuLogo.Shown, true, "The default logo mode is Shown");
 Expect(MenuLayout.DefaultAccent == MenuAccent.Green, true, "The default Side Rail accent is Green");
-Expect(MenuLayout.StyleChange(MenuStyle.Vanilla, MenuStyle.Vanilla, true) == MenuStyleChange.None, true, "Vanilla leaves the stock menu alone");
+Expect(MenuLayout.StyleChange(null, MenuStyle.Vanilla, true) == MenuStyleChange.None, true, "Vanilla leaves the stock menu alone");
+Expect(MenuLayout.StyleChange(null, MenuLayout.DefaultStyle, true) == MenuStyleChange.Build, true,
+    "The default Bottom bar is built on a fresh title screen");
+Expect(MenuLayout.StyleChange(null, MenuStyle.SideRail, true) == MenuStyleChange.Build, true,
+    "A saved Side rail builds immediately on a fresh title screen");
+Expect(MenuLayout.StyleChange(null, MenuStyle.SideRail, false) == MenuStyleChange.None, true,
+    "A fresh title waits for game startup and modal readiness");
 Expect(MenuLayout.StyleChange(MenuStyle.SideRail, MenuStyle.SideRail, true) == MenuStyleChange.None, true, "The active style is not rebuilt");
 Expect(MenuLayout.StyleChange(MenuStyle.SideRail, MenuStyle.MinimalCorner, false) == MenuStyleChange.None, true, "A style switch waits until the title is ready and the modal closes");
 Expect((int)MenuStyle.MinimalCorner == 2 && (int)MenuStyle.BottomBar == 3, true, "Bottom bar appends to the existing config values");
@@ -151,17 +172,17 @@ foreach (MenuStyle to in Enum.GetValues<MenuStyle>())
 {
     if (from == to) continue;
     var firstChange = from == MenuStyle.Vanilla ? MenuStyleChange.Build : MenuStyleChange.Restore;
-    Expect(MenuLayout.StyleChange(from, to, true) == firstChange, true,
+    MenuStyle? built = from == MenuStyle.Vanilla ? null : from;
+    Expect(MenuLayout.StyleChange(built, to, true) == firstChange, true,
         $"The transition from {from} to {to} starts with the correct build or restore step");
-    MenuStyle built = from;
     for (int frame = 0; frame < 2; frame++)
         built = MenuLayout.StyleChange(built, to, true) switch
         {
-            MenuStyleChange.Restore => MenuStyle.Vanilla,
+            MenuStyleChange.Restore => null,
             MenuStyleChange.Build => to,
             _ => built,
         };
-    Expect(built == to && MenuLayout.StyleChange(built, to, true) == MenuStyleChange.None, true,
+    Expect((built ?? MenuStyle.Vanilla) == to && MenuLayout.StyleChange(built, to, true) == MenuStyleChange.None, true,
         $"The transition from {from} to {to} settles after at most two frames");
 }
 

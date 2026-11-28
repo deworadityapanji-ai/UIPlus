@@ -101,8 +101,6 @@ internal static partial class ArcadeHud
             if (Mathf.Abs(now.r - _sampledColour.r) + Mathf.Abs(now.g - _sampledColour.g) + Mathf.Abs(now.b - _sampledColour.b) > 0.02f)
                 _aircraft = null;
         }
-        CheckBorrowedOwners();
-        if (BorrowedGauges.Count == 0 && _vector != null && TrayNodes().Count > 0) BorrowVectorGauges();
         if (PlusRwrOnMap == null || PlusRwrOnMap.Value) CentreMinimap(aircraft);
         if (_topBar != null) RefreshTopBar();
         if (_ring != null) RefreshRing(aircraft);
