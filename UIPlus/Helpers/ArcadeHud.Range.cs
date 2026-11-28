@@ -123,22 +123,27 @@ internal static partial class ArcadeHud
 
     // ---- range scale on a line (Arcade's throttle tape, Wingman's divider) ---------------------
 
-    private static RectTransform _rangeScale, _rangeMax, _rangeNez, _rangeMin, _rangeNezBand, _rangeCaret;
+    private static RectTransform _rangeScale, _rangeMax, _rangeNez, _rangeMin, _rangeNezBand, _rangeTargetBar, _rangeCaret;
     private static TextMeshProUGUI _rangeMaxText, _rangeNezText, _rangeCaretText, _rangeHint;
     private static float _rangeX, _rangeDir, _rangeH;
 
     /// <param name="spine">The line to put the scale on; its bottom is zero range.</param>
     /// <param name="direction">-1: ticks and labels to the left of the line; +1: to the right.</param>
     /// <param name="tickX">Where the ticks start, from the line's centre.</param>
-    /// <param name="bandX">Where the NEZ band runs, from the line's centre (0 = on the line).</param>
-    private static void BuildRangeScale(RectTransform spine, float height, float direction, float tickX, float bandX)
+    /// <param name="bandX">Where the vertical fill runs, from the line's centre (0 = on the line).</param>
+    /// <param name="targetFill">Use the vertical fill for target distance. Otherwise it marks the NEZ.</param>
+    private static void BuildRangeScale(RectTransform spine, float height, float direction, float tickX, float bandX,
+        bool targetFill = false)
     {
         _rangeScale = null;
         if (spine == null) return;
         _rangeDir = direction; _rangeX = tickX; _rangeH = height;
         _rangeScale = Rect("RangeScale", spine, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(2f, height));
-        _rangeNezBand = Rect("NezBand", _rangeScale, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(bandX, 0f), new Vector2(3f, 0f));
-        Fill(_rangeNezBand, Color.white);
+        RectTransform band = Rect(targetFill ? "Target range fill" : "NezBand", _rangeScale,
+            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(bandX, 0f), new Vector2(3f, 0f));
+        Fill(band, Color.white);
+        _rangeTargetBar = targetFill ? band : null;
+        _rangeNezBand = targetFill ? null : band;
         _rangeMax = Tick("Max", 10f, out _rangeMaxText, 11);
         _rangeNez = Tick("Nez", 10f, out _rangeNezText, 11);
         _rangeNezText.text = "NEZ";
@@ -187,23 +192,38 @@ internal static partial class ArcadeHud
         _rangeMaxText.text = "MAX " + Km(r.Max);
         _rangeMaxText.color = ink;
         _rangeNez.gameObject.SetActive(r.NezShown);
-        _rangeNezBand.gameObject.SetActive(r.NezShown);
+        if (_rangeNezBand != null) _rangeNezBand.gameObject.SetActive(r.NezShown);
         if (r.NezShown)
         {
             SetTick(_rangeNez, Y(r.Nez), alert);
             _rangeNezText.color = alert;
-            _rangeNezBand.sizeDelta = new Vector2(3f, Y(r.Nez));
-            _rangeNezBand.GetComponent<Image>().color = new Color(alert.r, alert.g, alert.b, 0.55f);
+            if (_rangeNezBand != null)
+            {
+                _rangeNezBand.sizeDelta = new Vector2(3f, Y(r.Nez));
+                _rangeNezBand.GetComponent<Image>().color = new Color(alert.r, alert.g, alert.b, 0.55f);
+            }
         }
         _rangeMin.gameObject.SetActive(r.Min > r.Max * 0.02f);
         SetTick(_rangeMin, Y(r.Min), Faded(0.5f));
 
         _rangeCaret.gameObject.SetActive(r.HasTarget);
+        if (_rangeTargetBar != null) _rangeTargetBar.gameObject.SetActive(r.HasTarget);
         if (!r.HasTarget) return;
         bool inNez = r.NezShown ? r.Target < r.Nez : r.Target <= r.Max;
         bool outOfRange = r.Target > r.Max;
         Color caret = outOfRange ? Faded(0.45f) : inNez ? alert : Green;
-        SetTick(_rangeCaret, Y(r.Target), caret);
+        float targetY = Y(r.Target);
+        SetTick(_rangeCaret, targetY, caret);
+        if (_rangeTargetBar != null)
+        {
+            _rangeTargetBar.sizeDelta = new Vector2(3f, targetY);
+            _rangeTargetBar.GetComponent<Image>().color = new Color(alert.r, alert.g, alert.b, 0.85f);
+            // The target can share the MAX tick's height, but their text needs separate rows.
+            RectTransform distance = _rangeCaretText.rectTransform;
+            Vector2 position = distance.anchoredPosition;
+            position.y = h - targetY < 16f ? h + 16f - targetY : 0f;
+            distance.anchoredPosition = position;
+        }
         _rangeCaretText.text = Km(r.Target);
         _rangeCaretText.color = caret;
         bool flash = Mathf.Sin(Time.timeSinceLevelLoad * 12f) > -0.3f;

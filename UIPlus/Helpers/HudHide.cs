@@ -32,8 +32,13 @@ internal static class HudHide
     }
 
     // Late in the frame (after the game and UI Plus turned things on): keep everything off.
-    internal static void Apply()
+    internal static void Apply(bool stockHud)
     {
+        if (stockHud)
+        {
+            if (Saved.Count != 0) Restore();
+            return;
+        }
         if (!Hidden) return;
         FlightHud hud = SceneSingleton<FlightHud>.i;
         Hide(hud != null ? HudCanvas?.GetValue(hud) as Canvas : null);

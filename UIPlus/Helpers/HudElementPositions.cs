@@ -11,9 +11,11 @@ namespace UIPlus.Helpers;
 internal static class HudElementPositions
 {
     internal const int Map = 1, Weapon = 2, LeftInstruments = 3, RightInstruments = 4,
-        Compass = 5, Damage = 6, Waterline = 7, SpeedBlock = 8, AltBlock = 9, WeaponList = 10, StatusRow = 11, VectorGauges = 12, Caution = 13, PullUp = 14, Rwr = 15, Subtitle = 16, Banner = 17, Bars = 18, Strip = 19, TopBar = 20, DataBlock = 21, Ring = 22, TargetScreen = 23, KillFeed = 24, RwrAlerts = 25, FuelTape = 26, ThrottleTape = 27, WeaponWheel = 28, MissileArcs = 29, Count = 30;
+        Compass = 5, Damage = 6, Waterline = 7, SpeedBlock = 8, AltBlock = 9, WeaponList = 10, StatusRow = 11, VectorGauges = 12, Caution = 13, PullUp = 14, Rwr = 15, Subtitle = 16, Banner = 17, Bars = 18, Strip = 19, TopBar = 20, DataBlock = 21, Ring = 22, TargetScreen = 23, KillFeed = 24, RwrAlerts = 25, FuelTape = 26, ThrottleTape = 27, WeaponWheel = 28, MissileArcs = 29,
+        AnalogEngine = 30, AnalogAirspeed = 31, AnalogAttitude = 32, AnalogAltimeter = 33, AnalogClimb = 34, AnalogHeading = 35, AnalogGMeter = 36, AnalogAoa = 37, AnalogStores = 38, Count = 39;
     private static readonly string[] Names = { "", "Map", "Weapon", "LeftInstruments", "RightInstruments",
-        "Compass", "Damage", "Waterline", "SpeedBlock", "AltBlock", "WeaponList", "StatusRow", "VectorGauges", "Caution", "PullUp", "Rwr", "Subtitle", "Banner", "Bars", "Strip", "TopBar", "DataBlock", "WeaponRing", "TargetingScreen", "KillFeed", "RwrAlerts", "FuelTape", "ThrottleTape", "WeaponWheel", "MissileArcs" };
+        "Compass", "Damage", "Waterline", "SpeedBlock", "AltBlock", "WeaponList", "StatusRow", "VectorGauges", "Caution", "PullUp", "Rwr", "Subtitle", "Banner", "Bars", "Strip", "TopBar", "DataBlock", "WeaponRing", "TargetingScreen", "KillFeed", "RwrAlerts", "FuelTape", "ThrottleTape", "WeaponWheel", "MissileArcs",
+        "Engine", "Airspeed", "Attitude", "Altimeter", "Climb", "Heading", "GMeter", "Aoa", "Stores" };
 
     internal static ConfigEntry<HudStyle> Style;
     internal static ConfigEntry<bool> PlainBackingWhenMoved;
@@ -27,6 +29,8 @@ internal static class HudElementPositions
     private static readonly ConfigEntry<float>[] MinimalY = new ConfigEntry<float>[Count];
     private static readonly ConfigEntry<float>[] ThunderX = new ConfigEntry<float>[Count];
     private static readonly ConfigEntry<float>[] ThunderY = new ConfigEntry<float>[Count];
+    private static readonly ConfigEntry<float>[] AnalogX = new ConfigEntry<float>[Count];
+    private static readonly ConfigEntry<float>[] AnalogY = new ConfigEntry<float>[Count];
     private static readonly ConfigEntry<float>[] PlusX = new ConfigEntry<float>[Count];
     private static readonly ConfigEntry<float>[] PlusY = new ConfigEntry<float>[Count];
 
@@ -49,8 +53,8 @@ internal static class HudElementPositions
         ? id <= Waterline || id == Caution || id == PullUp || id == Subtitle || id == Banner || id == VectorGauges
           || id == TopBar || id == Ring || id == KillFeed || ((id == Rwr || id == RwrAlerts) && RwrCompat.Active)
         : Arcade
-        ? id != LeftInstruments && id != RightInstruments && id != Weapon && id != Ring && ((id != Rwr && id != RwrAlerts) || RwrCompat.Active)
-          && (id != Strip || Style.Value == HudStyle.Dashboard)
+        ? (id < AnalogEngine || Style.Value == HudStyle.Analog) && id != LeftInstruments && id != RightInstruments && id != Weapon && id != Ring && ((id != Rwr && id != RwrAlerts) || RwrCompat.Active)
+          && (id != Strip || Style.Value == HudStyle.Dashboard || Style.Value == HudStyle.Analog)
           // The star wheel cannot be added while Wingman's cluster (which has its own star) shows.
           && (id != WeaponWheel || !ElementLooks.WingmanClusterIn(Style.Value))
         : id <= Waterline || ((id == Rwr || id == RwrAlerts) && RwrCompat.Active);
@@ -62,6 +66,7 @@ internal static class HudElementPositions
         internal Image Panel;
         internal Color PanelColor;
         internal RectTransform Rect;
+        internal bool Instrument;
     }
 
     // Starting layout for the Arcade style, as offsets (percent of screen, +x right, +y down) from
@@ -78,18 +83,24 @@ internal static class HudElementPositions
         // "Minimal" was renamed "Dashboard": read the saved word before binding (which would reject it).
         bool wasMinimal = SavedValue(config, "HUD Layout", "HudStyle") == "Minimal";
         Style = config.Bind("HUD Layout", "HudStyle", HudStyle.Native,
-            "Native keeps the game's HUD, with your saved positions. Arcade is an Ace Combat style layout; Wingman is a Project Wingman style layout; Dashboard puts every instrument in one strip along the bottom, to glance at; Thunder is a War Thunder style, text-first layout. Each style keeps its own saved layout.");
+            "Native keeps the game's HUD, with your saved positions. Arcade is an Ace Combat style layout; Wingman is a Project Wingman style layout; Dashboard puts every instrument in one strip along the bottom, to glance at; Thunder is a War Thunder style, text-first layout; Analog is a panel of round cockpit dials along the bottom. Each style keeps its own saved layout.");
         if (wasMinimal) Style.Value = HudStyle.Dashboard;
         ArcadeHud.ArcadeTargetingScreen = config.Bind("HUD Layout", "ArcadeTargetingScreen", true,
             "Arcade style: show the targeting-camera feed as an Ace Combat style lock-on window in the top-right corner while a target is selected.");
         ArcadeHud.WingmanTargetingScreen = config.Bind("HUD Layout", "WingmanTargetingScreen", true,
             "Wingman style: show the targeting-camera feed in the top-left corner, leaning like the map, while a target is selected.");
         ArcadeHud.KillFeed = config.Bind("HUD Layout", "KillFeed", KillFeedMode.All,
-            "A compact kill feed (killer >> victim, newest on top, fading after a few seconds) in the custom styles. All shows every kill; Mine only yours and your own death; Off hides it. Shot-down missiles are not listed.");
+            "A compact feed in the custom HUD styles. All shows all combat events; Mine shows combat events involving you; Off hides the feed. Player join and leave messages have their own switch.");
+        ArcadeHud.KillFeedIntercepts = config.Bind("HUD Layout", "KillFeedIntercepts", true,
+            "Show intercepted munitions in the custom kill feed. In Mine mode, show your intercepts and intercepted munitions fired by or aimed at you.");
+        ArcadeHud.KillFeedPlayers = config.Bind("HUD Layout", "KillFeedPlayers", true,
+            "Show players joining or leaving in the custom kill feed in both All and Mine modes.");
         ArcadeHud.DashboardDockMap = config.Bind("HUD Layout", "DashboardDockMap", true,
             "Dashboard style: dock the minimap against the instrument strip's left end, bottoms aligned. Moving the map in the layout editor turns this off for that layout.");
         ArcadeHud.WeaponPopup = config.Bind("HUD Layout", "WeaponPopup", WeaponPopupMode.WingmanOnly,
             "Project Wingman style WEAPON SYSTEM pop-up naming the weapon you switch to. WingmanOnly shows it in the Wingman style; AllStyles in every custom style; Off never.");
+        ArcadeHud.CapacitorDisplaySetting = config.Bind("HUD Layout", "CapacitorDisplay", CapacitorDisplay.Text,
+            "Text shows the capacitor percentage. Bar shows stored energy in kJ and an arrow while charging or draining. Applies to the styles that replace the game's weapon panel.");
         ArcadeHud.PlusRwrOnMap = config.Bind("HUD Layout", "PlusRwrOnMap", true,
             new ConfigDescription("Plus style: lay the KaceyTronic RWR scope over the minimap (the map is then centred on your aircraft). Off leaves the map exactly as the game draws it.", null, new ConfigurationManagerAttributes()));
         ArcadeHud.PlusFactionBar = config.Bind("HUD Layout", "PlusFactionBar", true,
@@ -117,6 +128,9 @@ internal static class HudElementPositions
             "Replace the corner-shaped panel art with a plain dark rectangle once the map or weapon panel is moved away from its default corner.");
         for (int i = 1; i < Count; i++)
         {
+            AnalogX[i] = BindOffset(config, "Analog" + Names[i] + "XPercent", 0f);
+            AnalogY[i] = BindOffset(config, "Analog" + Names[i] + "YPercent", 0f);
+            if (i >= AnalogEngine) continue;
             if (i <= Waterline || i == Rwr || i == RwrAlerts)
             {
                 NativeX[i] = BindOffset(config, Names[i] + "XPercent", 0f);
@@ -172,6 +186,7 @@ internal static class HudElementPositions
         HudStyle.Wingman => (xAxis ? WingmanX : WingmanY)[id],
         HudStyle.Dashboard => (xAxis ? MinimalX : MinimalY)[id],
         HudStyle.Thunder => (xAxis ? ThunderX : ThunderY)[id],
+        HudStyle.Analog => (xAxis ? AnalogX : AnalogY)[id],
         HudStyles.Plus => (xAxis ? PlusX : PlusY)[id],
         _ => (xAxis ? NativeX : NativeY)[id],
     };
@@ -232,8 +247,10 @@ internal static class HudElementPositions
 
         bool plain = PlainBackingWhenMoved.Value;
         // Arcade hides the native weapon art itself, so a backing would only draw a stray box.
-        int mapSkin = ElementLooks.SkinOf(Map);   // 1 = always the game's art, 2 = always plain
-        if (map != null) UpdateBacking(Map, mapSkin == 2 || (mapSkin == 0 && plain && Moved(Map)), () => AddRect(map.transform));
+        int mapSkin = ElementLooks.SkinOf(Map);
+        bool instrument = mapSkin == 3 || (mapSkin == 0 && Style.Value == HudStyle.Analog);
+        if (map != null) UpdateBacking(Map, instrument || mapSkin == 2 || (mapSkin == 0 && plain && Moved(Map)),
+            () => AddRect(map.transform), instrument);
         UpdateBacking(Weapon, plain && !Arcade && Moved(Weapon), () =>
         {
             Transform panel = _target[Weapon];
@@ -279,7 +296,7 @@ internal static class HudElementPositions
         if (scale <= 0.0001f) return;
         Vector3 delta = new Vector3(Screen.width * Offset(id, true) / 100f,
             -Screen.height * Offset(id, false) / 100f, 0f) / scale;
-        if (id == Map) delta += (Vector3)ArcadeHud.MapDock / scale;   // Dashboard docks the map to its strip
+        if (id == Map && ArcadeHud.MapDocked) delta += (Vector3)ArcadeHud.MapDock / scale;   // Dashboard docks the map to its strip
         Vector3 wanted = _base[id] + delta;
         // Wingman's perspective lean: the map turns slightly about its bottom-left corner. The
         // position is adjusted so that corner stays where it was.
@@ -326,26 +343,36 @@ internal static class HudElementPositions
     private const string BackingName = "UI Plus Backing";
     private static readonly Color BackingColor = new(0f, 0f, 0f, 0.867f);
 
-    private static void UpdateBacking(int id, bool plain, System.Action collectContent)
+    private static void UpdateBacking(int id, bool needed, System.Action collectContent, bool instrument = false)
     {
         Transform panel = _target[id];
-        if (!plain || panel == null)
+        if (!needed || panel == null)
         {
             Unback(id);
             return;
         }
         Backing b = _backing[id];
+        if (b != null && b.Instrument != instrument)
+        {
+            Unback(id);
+            b = null;
+        }
         if (b == null)
         {
             var image = panel.GetComponent<Image>();
             if (image == null) return;
-            var go = new GameObject(BackingName, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            var go = new GameObject(BackingName, typeof(RectTransform));
             go.transform.SetParent(panel, false);
             go.transform.SetAsFirstSibling();
-            var img = go.GetComponent<Image>();
-            img.color = BackingColor;
-            img.raycastTarget = false;
-            b = new Backing { Panel = image, PanelColor = image.color, Rect = (RectTransform)go.transform };
+            var root = (RectTransform)go.transform;
+            if (instrument) ArcadeHud.BuildInstrumentScreen(root);
+            else
+            {
+                var img = go.AddComponent<Image>();
+                img.color = BackingColor;
+                img.raycastTarget = false;
+            }
+            b = new Backing { Panel = image, PanelColor = image.color, Rect = root, Instrument = instrument };
             _backing[id] = b;
             image.color = new Color(image.color.r, image.color.g, image.color.b, 0f);
         }
@@ -372,7 +399,7 @@ internal static class HudElementPositions
             bool shown = !NuclearMinimapHidesMap;
             if (b.Rect.gameObject.activeSelf != shown) b.Rect.gameObject.SetActive(shown);
         }
-        const float pad = 10f;
+        float pad = instrument ? ArcadeHud.ScreenFrameWidth : 10f;
         RectTransform rt = b.Rect;
         rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = max - min + new Vector2(pad * 2f, pad * 2f);
@@ -407,7 +434,11 @@ internal static class HudElementPositions
     {
         Backing b = _backing[id];
         if (b == null) return;
-        if (b.Rect != null) Object.Destroy(b.Rect.gameObject);
+        if (b.Rect != null)
+        {
+            b.Rect.gameObject.SetActive(false);
+            Object.Destroy(b.Rect.gameObject);
+        }
         if (b.Panel != null) b.Panel.color = b.PanelColor;
         _backing[id] = null;
     }

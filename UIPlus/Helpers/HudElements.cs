@@ -24,7 +24,7 @@ namespace UIPlus.Helpers;
 /// receiver, the gear indicator and the helicopter's hover indicator all live in the same containers,
 /// and tidying the frame is not worth being told about a stall too late.
 /// </summary>
-internal static class HudElements
+internal static partial class HudElements
 {
     /// <summary>
     /// Airspeed, angle of attack, Mach, g and fuel — the cluster on the left of the frame.
@@ -50,6 +50,7 @@ internal static class HudElements
     private static readonly List<GameObject> Left = new();
     private static readonly List<GameObject> Right = new();
     private static readonly List<GameObject> Compass = new();
+    private static readonly Dictionary<GameObject, bool> HudViewVisibility = new();
 
     private sealed class AttachmentPose
     {
@@ -110,6 +111,13 @@ internal static class HudElements
     private static FieldInfo _canvasField;
     private static FieldInfo _waterlineField;
 
+    internal static bool IsCameraAttached(Transform node)
+    {
+        for (int i = 0; i < _attachedCount; i++)
+            if (Attached[i].Node == node && Attached[i].Mode == HudAttachment.Camera) return true;
+        return false;
+    }
+
     private static readonly IComparer<AttachmentPose> RestoreOrder = Comparer<AttachmentPose>.Create((a, b) => {
         int parent = (a.Parent == null ? 0 : a.Parent.GetInstanceID()).CompareTo(b.Parent == null ? 0 : b.Parent.GetInstanceID());
         return parent != 0 ? parent : a.Sibling.CompareTo(b.Sibling);
@@ -117,6 +125,7 @@ internal static class HudElements
 
     internal static void RestoreAttachments()
     {
+        RestoreStockRoll();
         _layoutStamp = null;
         _presentationFrame = -1; _presentationCanvas = null;
         Attached.Sort(0, _attachedCount, RestoreOrder);
@@ -165,7 +174,7 @@ internal static class HudElements
         _attachedCount = 0;
     }
 
-    internal static void AttachToCamera(CameraStateManager cam)
+    internal static void AttachToCamera(CameraStateManager cam, bool hudView)
     {
         FlightHud hud = SceneSingleton<FlightHud>.i;
         if (hud == null || cam.mainCamera == null || cam.followingUnit == null) return;
@@ -182,7 +191,7 @@ internal static class HudElements
         SuppressHelmetDuplicates();
         // Reapply visibility after restoration, so selecting Hidden cannot reveal
         // the just-restored gauge for a frame.
-        Apply(LeftMode, RightMode, Plugin.Compass.Value);
+        Apply(LeftMode, RightMode, Plugin.Compass.Value, hudView);
         Transform center = hud.GetHUDCenter();
         if (center == null) return;
         if (!TryCanvasPoint(canvas, canvasRect, cam.mainCamera.pixelRect.center, out Vector3 screenCenter))
@@ -202,6 +211,12 @@ internal static class HudElements
         // screen-fixed by the game and cannot be unrotated using HUDCenter.
         Queue(Left, center, canvasRect, screenCenter, LeftMode, 0);
         Queue(Right, center, canvasRect, screenCenter, RightMode, 1);
+        if (RightMode == HudAttachment.Camera && PusherAircraft.HasPusher(_scannedAircraft))
+        {
+            CustomAxis1Gauge pusher = PusherStockHud.ReversibleGauge;
+            if (pusher != null)
+                Queue(pusher.transform, center, canvasRect, screenCenter, HudAttachment.Camera, groupId: 1);
+        }
         Queue(Compass, center, canvasRect, screenCenter, Plugin.Compass.Value, 2);
         // User offsets per group, in canvas-local units (pixels divided by the canvas scale).
         float canvasScale = canvasRect.lossyScale.x > 0.0001f ? canvasRect.lossyScale.x : 1f;
@@ -263,6 +278,7 @@ internal static class HudElements
             if (followsAircraft && !noseVisible) pose.Node.gameObject.SetActive(false);
         }
         _presentationCanvas = canvas; _presentationFrame = Time.frameCount;
+        CorrectStockRoll(canvas);
         _canvasAtPlacement = canvasRect.position; _originAtPlacement = Datum.originPosition;
         if (_reportedCanvas != canvas.GetInstanceID())
         {
@@ -282,7 +298,7 @@ internal static class HudElements
         }
     }
 
-    private static bool TryCanvasPoint(Canvas canvas, RectTransform rect, Vector2 screen, out Vector3 local)
+    internal static bool TryCanvasPoint(Canvas canvas, RectTransform rect, Vector2 screen, out Vector3 local)
     {
         if (canvas.renderMode != RenderMode.WorldSpace)
             return HudCanvasMath.TryScreenToLocal(screen, canvas.pixelRect, rect.rect, out local);
@@ -295,10 +311,10 @@ internal static class HudElements
     private static void BeforeCanvasRender()
     {
         if (_inRenderCallback || _presentationFrame != Time.frameCount || _presentationCanvas == null
-            || !_presentationCanvas.isActiveAndEnabled || !Plugin.IsActive || !Plugin.FlightHud.Value || DynamicMap.mapMaximized)
+            || !_presentationCanvas.isActiveAndEnabled || !Plugin.IsActive || DynamicMap.mapMaximized)
             return;
         CameraStateManager cam = SceneSingleton<CameraStateManager>.i;
-        if (cam == null || cam.currentState != cam.chaseState || cam.followingUnit == null) return;
+        if (!HudViews.CameraAttached(cam) || cam.followingUnit == null) return;
         _inRenderCallback = true;
         try
         {
@@ -332,6 +348,7 @@ internal static class HudElements
                 }
             }
             // Native HMD duplicates are managed separately from flight widgets.
+            CorrectStockRoll(_presentationCanvas);
             // Do not overwrite the visibility snapshot when checking another render.
             foreach (HelmetVisibility readout in HelmetReadouts)
                 if (readout.Node != null && readout.Node.activeSelf) readout.Node.SetActive(false);
@@ -414,7 +431,7 @@ internal static class HudElements
         pose.LayoutRotation = centerMarker ? Quaternion.identity : Quaternion.Inverse(reference.rotation) * node.rotation;
         _attachedCount++;
     }
-    private static Vector3 NativeLocalPoint(Transform node, Transform reference)
+    internal static Vector3 NativeLocalPoint(Transform node, Transform reference)
     {
         // Use the original local layout instead of subtracting two projected
         // world positions, which lose precision when HUDCenter is far off-screen.
@@ -431,7 +448,7 @@ internal static class HudElements
     /// repair, so switching aircraft or camera mode is picked up without anything having to announce
     /// it. <c>SetActive</c> is only called when a group is actually in the wrong state.
     /// </summary>
-    internal static void Apply(HudAttachment left, HudAttachment right, HudAttachment compass)
+    internal static void Apply(HudAttachment left, HudAttachment right, HudAttachment compass, bool hudView = false)
     {
         FlightHud hud = SceneSingleton<FlightHud>.i;
         if (hud == null)
@@ -444,10 +461,19 @@ internal static class HudElements
         if (_root != hud.transform || IsStale())
             Rescan(hud);
 
-        Show(Left, left != HudAttachment.Hidden);
-        Show(Right, right != HudAttachment.Hidden);
-        Show(Compass, compass != HudAttachment.Hidden);
+        Show(Left, left != HudAttachment.Hidden, hudView);
+        Show(Right, right != HudAttachment.Hidden, hudView);
+        Show(Compass, compass != HudAttachment.Hidden, hudView);
 
+    }
+
+    internal static void RestoreHudViewVisibility()
+    {
+        RestoreAttachments();
+        RestoreHelmetDuplicates();
+        foreach (var saved in HudViewVisibility)
+            if (saved.Key != null && saved.Key.activeSelf != saved.Value) saved.Key.SetActive(saved.Value);
+        HudViewVisibility.Clear();
     }
 
     /// <summary>Puts every group back, for leaving chase.</summary>
@@ -463,12 +489,15 @@ internal static class HudElements
         Show(Compass, true);
     }
 
-    private static void Show(List<GameObject> group, bool show)
+    private static void Show(List<GameObject> group, bool show, bool hudView = false)
     {
         foreach (GameObject element in group)
         {
             if (element != null && element.activeSelf != show)
+            {
+                if (hudView && !HudViewVisibility.ContainsKey(element)) HudViewVisibility.Add(element, element.activeSelf);
                 element.SetActive(show);
+            }
         }
     }
 
@@ -511,6 +540,7 @@ internal static class HudElements
         Right.Clear();
         Compass.Clear();
         _scannedAircraft = SceneSingleton<CombatHUD>.i != null ? SceneSingleton<CombatHUD>.i.aircraft : null;
+        _nativeFuel = _nativeThrottle = null;
         _nextEmptyRescan = Time.unscaledTime + 0.5f;
 
         // Inactive children included: a gauge the game has switched off for this airframe must still
@@ -525,6 +555,9 @@ internal static class HudElements
                 if (component is HUDApp app && (!HudLayoutMath.IsFlightInstrument(AppType(app)) || IsHelmetReadout(app)))
                     continue;
                 string type = component.GetType().Name;
+
+                if (component is FuelGauge) _nativeFuel = component;
+                else if (component is ThrottleGauge) _nativeThrottle = component;
 
                 if (Contains(LeftTypes, type))
                     AddInstrument(Left, component);

@@ -91,7 +91,7 @@ internal static class MinimapZoom
         map.mapBackground.rectTransform.rect.width
         / Mathf.Max(0.0001f, map.mapDisplayFactor * map.mapBackground.transform.localScale.x * scale);
 
-    internal static void Tick()
+    internal static void Tick(bool stockHud)
     {
         DynamicMap map = SceneSingleton<DynamicMap>.i;
         if (map != _map)
@@ -109,7 +109,7 @@ internal static class MinimapZoom
             return;
         }
         // NuclearMinimap has its own minimap zoom: hand the map back and stay out of its way.
-        if (HudElementPositions.NuclearMinimapPresent)
+        if (stockHud || HudElementPositions.NuclearMinimapPresent)
         {
             HandBack(map);
             if (_label != null) _label.gameObject.SetActive(false);

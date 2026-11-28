@@ -50,7 +50,7 @@ internal static class SteadyHud
         }
         int ok = 0;
         ok += InstallSync(harmony) ? 1 : 0;
-        ok += Patch(harmony, typeof(FlightHud), "Update", nameof(FlightHudPostfix)) ? 1 : 0;
+        ok += Patch(harmony, typeof(FlightHud), "Update", nameof(FlightHudPostfix), nameof(RestoreSlingPose)) ? 1 : 0;
         ok += Patch(harmony, typeof(FuelGauge), "UpdateFuelGauge", nameof(FuelPostfix)) ? 1 : 0;
         ok += Patch(harmony, typeof(ThrottleGauge), "UpdateThrottleDisplay", nameof(ThrottlePostfix)) ? 1 : 0;
         ok += Patch(harmony, typeof(ThreatItem), "AlignNotchIndicator", nameof(NotchPostfix)) ? 1 : 0;
@@ -59,13 +59,14 @@ internal static class SteadyHud
         Plugin.Logger.LogInfo($"Steady HUD: {ok}/6 hooks applied.");
     }
 
-    private static bool Patch(Harmony harmony, Type type, string method, string postfix)
+    private static bool Patch(Harmony harmony, Type type, string method, string postfix, string prefix = null)
     {
         try
         {
             MethodInfo target = AccessTools.Method(type, method);
             if (target == null) { Plugin.Logger.LogWarning($"Steady HUD: {type.Name}.{method} not found; that part keeps the game's behaviour."); return false; }
-            harmony.Patch(target, postfix: new HarmonyMethod(AccessTools.Method(typeof(SteadyHud), postfix)));
+            harmony.Patch(target, prefix: prefix == null ? null : new HarmonyMethod(AccessTools.Method(typeof(SteadyHud), prefix)),
+                postfix: new HarmonyMethod(AccessTools.Method(typeof(SteadyHud), postfix)));
             return true;
         }
         catch (Exception e)
@@ -81,7 +82,12 @@ internal static class SteadyHud
         get
         {
             CameraStateManager cam = SceneSingleton<CameraStateManager>.i;
-            return cam != null && cam.currentState != null && cam.currentState != cam.cockpitState;
+            return HudViews.Current(cam) switch
+            {
+                HudCameraView.Cockpit => false,
+                HudCameraView.HudView => HudViews.HudView?.Value == true,
+                _ => cam != null && cam.currentState != null,
+            };
         }
     }
 
@@ -142,7 +148,7 @@ internal static class SteadyHud
         // Only while the camera update ran last frame too (so the held update surely runs this frame).
         if (frame - _lastFlush != 1) return true;
         CameraStateManager cam = SceneSingleton<CameraStateManager>.i;
-        if (cam == null || !cam.isActiveAndEnabled) return true;
+        if (cam == null || !cam.isActiveAndEnabled || HudViews.HudViewSuppressed(cam)) return true;
         if (_heldFrame != frame) { HeldBack.Clear(); _heldFrame = frame; }
         HeldBack.Add(new Held { Target = target, Run = run });
         return false;
@@ -168,7 +174,8 @@ internal static class SteadyHud
         try
         {
             // The flight-path marker and HUD centre lag the same way: place them again too.
-            if (Markers.Value && _flightHud != null && SceneSingleton<FlightHud>.i is FlightHud hud && hud.isActiveAndEnabled)
+            if (Markers.Value && _flightHud != null && SceneSingleton<FlightHud>.i is FlightHud hud && hud.isActiveAndEnabled
+                && !HudViews.HudViewSuppressed(SceneSingleton<CameraStateManager>.i))
                 Run(hud, _flightHud);
             if (_heldFrame != frame) return;
             foreach (Held held in HeldBack)
@@ -195,12 +202,62 @@ internal static class SteadyHud
     private static readonly FieldInfo ThrottleReading = AccessTools.Field(typeof(ThrottleGauge), "throttleReading");
     private static readonly FieldInfo Notch = AccessTools.Field(typeof(ThreatItem), "notchIndicator");
     private static readonly FieldInfo BearingText = AccessTools.Field(typeof(Bearing), "bearing");
+    private static readonly FieldInfo WeaponState = AccessTools.Field(typeof(CombatHUD), "weaponState");
+    private static Transform _adjustedSling;
+    private static Vector3 _slingLocalPosition;
+    private static Quaternion _slingLocalRotation;
+    private static Transform _stockSling;
+    private static int _stockSlingFrame = -1;
+    private static Vector3 _stockSlingPosition;
+    private static Quaternion _stockSlingRotation;
+
+    // Restore the prefab pose before the next native update (also when Steady HUD replays it).
+    private static void RestoreSlingPose()
+    {
+        if (_adjustedSling != null)
+        {
+            _adjustedSling.localPosition = _slingLocalPosition;
+            _adjustedSling.localRotation = _slingLocalRotation;
+        }
+        _adjustedSling = null;
+    }
 
     private static void FlightHudPostfix(FlightHud __instance)
     {
         if (!ThirdPerson) return;
         CameraStateManager cam = SceneSingleton<CameraStateManager>.i;
-        if (Upright.Value && __instance.GetHUDCenter() is Transform centre)
+        Transform centre = __instance.GetHUDCenter();
+        bool upright = Upright.Value && centre != null;
+        Transform sling = SlingUnder(centre);
+        Vector3 slingPosition = default;
+        Quaternion slingRotation = default;
+        if (sling != null)
+        {
+            sling.GetPositionAndRotation(out slingPosition, out slingRotation);
+            if (!_replaying)
+            {
+                _stockSling = sling;
+                _stockSlingFrame = Time.frameCount;
+                _stockSlingPosition = slingPosition;
+                _stockSlingRotation = slingRotation;
+            }
+
+            bool keepStockFrame = _replaying && _stockSlingFrame == Time.frameCount && _stockSling == sling;
+            if (upright || keepStockFrame)
+            {
+                // The sling layout represents real positions and angles. Preserve the pose
+                // from the game's normal update while the rest of the centre is steadied.
+                _adjustedSling = sling;
+                _slingLocalPosition = sling.localPosition;
+                _slingLocalRotation = sling.localRotation;
+                if (keepStockFrame)
+                {
+                    slingPosition = _stockSlingPosition;
+                    slingRotation = _stockSlingRotation;
+                }
+            }
+        }
+        if (upright)
         {
             // Turn the centre upright, keeping the flight-path marker where the game put it.
             Transform marker = __instance.velocityVector != null ? __instance.velocityVector.transform : null;
@@ -212,8 +269,16 @@ internal static class SteadyHud
                 && ladder.transform.IsChildOf(centre))
                 ladder.transform.eulerAngles = new Vector3(0f, 0f, -cam.mainCamera.transform.eulerAngles.z);
         }
+        if (_adjustedSling != null) _adjustedSling.SetPositionAndRotation(slingPosition, slingRotation);
         if (CameraCompass.Value && Ribbon?.GetValue(__instance) is RawImage ribbon && CameraHeading(out float heading))
             ribbon.uvRect = new Rect((heading + 135f) / 360f, 0f, 0.25f, 1f);
+    }
+
+    private static Transform SlingUnder(Transform centre)
+    {
+        CombatHUD combat = SceneSingleton<CombatHUD>.i;
+        return centre != null && combat != null && WeaponState?.GetValue(combat) is HUDSlingState sling &&
+            sling != null && sling.transform.IsChildOf(centre) ? sling.transform : null;
     }
 
     private static void FuelPostfix(FuelGauge __instance) => AlignReadout(__instance, FuelReading);

@@ -75,6 +75,8 @@ internal static partial class ArcadeHud
         _dataText.rectTransform.offsetMin = _dataText.rectTransform.offsetMax = Vector2.zero;
         _dataText.lineSpacing = 6f;
         AddShadow(_dataText);
+        if (_builtCapacitorBar)
+            _dataCap = BuildCapacitorBar(_dataBlock, new Vector2(0f, 1f), Vector2.zero, 190f, 28f, 15f);
     }
 
     // Top-centre faction bar and escalation meter (Thunder, and Plus).
@@ -170,8 +172,16 @@ internal static partial class ArcadeHud
         else if (fuel < 0.3f) fuelText = $"<color={warn}>{fuelText}</color>";
         sb.AppendLine($"{Line("THR", thr)}   {Line("FUEL", fuelText)}  {FuelEndurance(aircraft, alert, warn)}");
         TextMeshProUGUI rpm = Get<TextMeshProUGUI>(App<RPMGauge>(), "rpmText");
-        if (rpm != null && !string.IsNullOrEmpty(rpm.text))
-            sb.AppendLine(Line("RPM", $"<color={Hex(rpm.color)}>{rpm.text}</color>"));
+        bool hasRpm = rpm != null && !string.IsNullOrEmpty(rpm.text);
+        if (hasRpm) sb.Append(Line("RPM", $"<color={Hex(rpm.color)}>{rpm.text}</color>"));
+        if (_thunder && _hasPusher)
+        {
+            if (hasRpm) sb.Append("   ");
+            float prop = PusherAircraft.Value(aircraft);
+            int percent = Mathf.RoundToInt(Mathf.Abs(prop) * 100f);
+            sb.Append(Line("PROP", prop < 0f && percent > 0 ? $"REV {percent}%" : $"{percent}%"));
+        }
+        if (hasRpm || (_thunder && _hasPusher)) sb.AppendLine();
 
         // System tags as one text line (gear, brake, auto-hover), coloured as in the other styles.
         if (TagValues.Count > 0)
@@ -194,9 +204,13 @@ internal static partial class ArcadeHud
         }
         string rng = RangeText(aircraft, false);
         if (rng != null) sb.AppendLine(rng);
-        string cm = CountermeasureText(aircraft);
-        if (HasCapacitor()) cm += (cm.Length > 0 ? "   " : "") + $"CAP {100f * aircraft.GetPowerSupply().GetCharge():F0}%";
-        if (cm.Length > 0) sb.AppendLine(cm);
+        string cm = AppendCapacitorText(CountermeasureText(aircraft), "   ");
+        if (_builtCapacitorBar)
+        {
+            if (cm.Length > 0) sb.Append(cm);
+            else sb.Length -= System.Environment.NewLine.Length;
+        }
+        else if (cm.Length > 0) sb.AppendLine(cm);
         _dataText.text = sb.ToString();
         _dataText.color = Green;
         TextAlignmentOptions align = ElementLooks.SkinOf(DataBlockItem) switch
@@ -206,6 +220,13 @@ internal static partial class ArcadeHud
             _ => TextAlignmentOptions.TopLeft,
         };
         if (_dataText.alignment != align) _dataText.alignment = align;
+        if (ShowCapacitor(_dataCap))
+        {
+            // Match the data block's alignment and follow its variable number of lines.
+            float anchor = align == TextAlignmentOptions.TopRight ? 1f : align == TextAlignmentOptions.Top ? 0.5f : 0f;
+            _dataCap.Rect.anchorMin = _dataCap.Rect.anchorMax = _dataCap.Rect.pivot = new Vector2(anchor, 1f);
+            _dataCap.Rect.anchoredPosition = new Vector2(0f, -_dataText.preferredHeight - 4f);
+        }
 
         RefreshDamageReport();
         RefreshTopBar();

@@ -89,6 +89,12 @@ internal static partial class ArcadeHud
             _tgtPanel.anchorMin = _tgtPanel.anchorMax = new Vector2(1f, 0f);
             _tgtPanel.pivot = Vector2.zero;
             _tgtPanel.anchoredPosition = new Vector2(8f, 0f) + offset;
+            if (_analog)
+            {
+                // Analog's panel is wide: sit on top of its right end instead of beyond it.
+                _tgtPanel.anchorMin = _tgtPanel.anchorMax = Vector2.one;
+                _tgtPanel.anchoredPosition = new Vector2(-w, 8f) + offset;
+            }
         }
         else if (_thunder && MapScreenRect(out Rect map))
         {

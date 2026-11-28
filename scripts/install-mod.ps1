@@ -1,5 +1,6 @@
 param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release')
 . (Join-Path $PSScriptRoot 'environment.ps1')
+. (Join-Path $PSScriptRoot 'background-assets.ps1')
 Assert-ModReferences
 if (Get-Process -Name NuclearOption -ErrorAction SilentlyContinue) {
     throw 'Close Nuclear Option before installing the test build.'
@@ -20,3 +21,4 @@ if ((Get-FileHash -LiteralPath $sourceDll).Hash -ne (Get-FileHash -LiteralPath $
     throw 'Installed DLL does not match the build.'
 }
 Write-Host "Installed: $destinationDll"
+Copy-BundledBackgrounds (Join-Path $script:RepoDir 'assets\Backgrounds') (Join-Path $pluginDirectory 'Backgrounds')

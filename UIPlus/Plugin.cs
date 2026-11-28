@@ -3,6 +3,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using UIPlus.Helpers;
+using UIPlus.Menu;
 
 namespace UIPlus;
 
@@ -25,6 +26,7 @@ public class Plugin : BaseUnityPlugin
     internal static bool IsActive => true;
 
     public static ConfigEntry<bool> FlightHud;
+    internal static ConfigEntry<bool> HoverDriftIndicator;
     public static ConfigEntry<bool> Map;
     public static ConfigEntry<bool> PitchLadder;
     public static ConfigEntry<HudAttachment> Waterline;
@@ -83,6 +85,8 @@ public class Plugin : BaseUnityPlugin
 
         KillCallouts = Config.Bind("HUD Layout", "KillCallouts", true,
             "Arcade HUD style: show DESTROYED for your kills, HIT when your missile damages its target, MISS when it does not. Needs ArcadeCam, which judges the hits.");
+        HoverDriftIndicator = Config.Bind("HUD Layout", "HoverDriftIndicator", true,
+            "Show the game's hover drift indicator in replacement HUD styles.");
         Integrations.Bind(Config);
         MatchMissileIndicators = Integrations.MissileIndicators.Enabled;
         FixTargetArrow = Config.Bind("Compatibility", "FixTargetArrow", true,
@@ -95,6 +99,7 @@ public class Plugin : BaseUnityPlugin
         HudViews.Bind(Config);
         HudLayoutEditor.Bind(Config, SectionChaseHud);
         HudElementPositions.Bind(Config);
+        MenuSettings.Bind(Config);
         MinimapZoom.Bind(Config);
 
         var harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);

@@ -20,7 +20,8 @@ internal static partial class ArcadeHud
     private static RectTransform _strip, _rwrSlot, _alertSlot, _horizon, _aoaPointer;
     private static Vector2 StripBase = new(0f, 12f);
     private static TextMeshProUGUI _wpnName, _wpnCount, _cmLine, _nextList, _spdSub, _altSub, _aoaLine, _wpnRange;
-    private const float StripWidth = 1070f, StripHeight = 150f, BallSize = 118f, PitchScale = 2.4f;
+    private const float StripWidth = 1070f, BallSize = 118f, PitchScale = 2.4f;
+    private static float StripHeight => _analog ? AnalogHeight : 150f;
     private const float AoaTapeHeight = 96f, AoaMin = -5f, AoaMax = 25f;
     private const float BallCentreX = 600f;   // the attitude ball; the strip is pinned here at screen centre
     private const float BigText = 30f, MidText = 14f;
@@ -36,7 +37,7 @@ internal static partial class ArcadeHud
         Vector2 lo = RectTransformUtility.WorldToScreenPoint(null, c[0]);
         Vector2 hi = RectTransformUtility.WorldToScreenPoint(null, c[2]);
         centre = (lo + hi) * 0.5f;
-        size = Mathf.Abs(hi.x - lo.x);
+        size = _analog ? Vector3.Distance(c[0], c[3]) : Mathf.Abs(hi.x - lo.x);
         _strip.GetWorldCorners(c);
         stripTop = RectTransformUtility.WorldToScreenPoint(null, c[1]).y;
         return size > 10f;
@@ -115,9 +116,17 @@ internal static partial class ArcadeHud
 
         // Throttle and fuel as two vertical bars, values underneath.
         StripLabel("THR", 208f, -10f);
-        StripLabel("FUEL", 252f, -10f);
+        StripLabel("FUEL", _hasPusher ? 260f : 252f, -10f);
         _throttle = VBar(new Vector2(224f, -28f), 86f, "Throttle");
-        _fuel = VBar(new Vector2(268f, -28f), 86f, "Fuel");
+        _fuel = VBar(new Vector2(_hasPusher ? 276f : 268f, -28f), 86f, "Fuel");
+        if (_hasPusher)
+        {
+            BuildPusherBar(_strip, new Vector2(0f, 1f), new Vector2(248f, -28f - _throttle.Length * 0.5f),
+                _throttle.Length, _throttle.Thickness, false, Faded(0.15f));
+            TextMeshProUGUI prop = StripText("Pusher label", 9f, new Vector2(236f, -10f), 24f, "PROP",
+                TextAlignmentOptions.Center);
+            prop.color = Faded(0.75f);
+        }
         Divider(298f);
 
         // Air data: speed and altitude big, each with its details underneath.
@@ -147,7 +156,9 @@ internal static partial class ArcadeHud
         _reloadBarHeight = 42f;
         SetupReloadBars(_strip, new Vector2(720f, -132f), 36f, 8f);
         _cmLine = StripText("Countermeasures", 13, new Vector2(764f, -94f), 112f);
-        _cmLine.lineSpacing = 8f;
+        if (_builtCapacitorBar)
+            _weaponCap = BuildCapacitorBar(_strip, new Vector2(0f, 1f), new Vector2(764f, -114f), 112f, 26f, 11f);
+        else _cmLine.lineSpacing = 8f;
         Divider(880f);
 
         // The next weapons in cycle order (below their label, not on it).
@@ -161,17 +172,23 @@ internal static partial class ArcadeHud
         _damageReport = StripText("Failures", 11, new Vector2(DamageBase.x - 64f, -133f), 128f, "", TextAlignmentOptions.Center);
         _damageReport.enableWordWrapping = true;
 
-        // RWR moved off the strip (in the editor): drop its section and close the gap. The scope's
-        // slot stays where it was (unseen), so the scope keeps its place plus your offset.
+        TrimRwrSection(rwrFrom, rwrTo, RwrSection, false);
+    }
+
+    // RWR moved off the strip (in the editor), or (Analog) no RWR mod: drop its section and close
+    // the gap. The scope's slot stays where it was (unseen), so the scope keeps its place plus your
+    // offset.
+    private static void TrimRwrSection(int rwrFrom, int rwrTo, float section, bool always)
+    {
         _builtRwrAway = RwrAway;
         _stripTrim = 0f;
-        if (_builtRwrAway)
+        if (_builtRwrAway || always)
         {
-            _stripTrim = RwrSection;
+            _stripTrim = section;
             for (int i = 0; i < _strip.childCount; i++)
             {
                 var child = (RectTransform)_strip.GetChild(i);
-                if (i >= rwrFrom && i < rwrTo && child != _rwrSlot && child != _alertSlot)
+                if (i >= rwrFrom && i < rwrTo && child != _rwrSlot && child != _alertSlot && !(_analog && child == _rwrBezel && RwrCompat.Active))
                 {
                     child.gameObject.SetActive(false);
                     continue;
@@ -196,16 +213,31 @@ internal static partial class ArcadeHud
 
     // Dashboard: the minimap sits against the strip's left end, bottoms aligned, so the two read as
     // one unit. Only while the map is at its default spot (moving it in the editor turns this off).
+    internal static bool MapDocked => _minimal && _strip != null && !DynamicMap.mapMaximized
+        && (!_analog || ElementLooks.SkinOf(StripItem) == 0)
+        && !ElementLooks.Get(StripItem).Hidden && !ElementLooks.Get(HudElementPositions.Map).Hidden
+        && (DashboardDockMap == null || DashboardDockMap.Value)
+        && Mathf.Abs(HudElementPositions.Offset(HudElementPositions.Map, true)) < 0.001f
+        && Mathf.Abs(HudElementPositions.Offset(HudElementPositions.Map, false)) < 0.001f;
+
+    internal static bool MovesWithStrip(int id) => _minimal &&
+        (id >= HudElementPositions.AnalogEngine || id == HudElementPositions.Rwr || id == HudElementPositions.RwrAlerts
+        || id == HudElementPositions.VectorGauges || id == HudElementPositions.Damage
+        || (id == HudElementPositions.Map && MapDocked));
+
     private static void DockMap()
     {
-        bool want = _minimal && _strip != null && !DynamicMap.mapMaximized
-            && (DashboardDockMap == null || DashboardDockMap.Value)
-            && Mathf.Abs(HudElementPositions.Offset(HudElementPositions.Map, true)) < 0.001f
-            && Mathf.Abs(HudElementPositions.Offset(HudElementPositions.Map, false)) < 0.001f;
         DynamicMap map = SceneSingleton<DynamicMap>.i;
         RectTransform panel = map != null && map.hudMapAnchor != null ? map.hudMapAnchor.parent as RectTransform : null;
-        if (!want || panel == null) { MapDock = Vector2.zero; return; }
+        if (!MapDocked || panel == null) { MapDock = Vector2.zero; return; }
         var c = new Vector3[4];
+        if (_analog && HudElementPositions.TryGetScreenRect(HudElementPositions.Map, out Rect mapRect))
+        {
+            _strip.GetWorldCorners(c);
+            Rect strip = HudElementPositions.ToGui(c);
+            MapDock += new Vector2(strip.xMin - mapRect.xMax, mapRect.yMax - strip.yMax);
+            return;
+        }
         panel.GetWorldCorners(c);
         float right = Mathf.Max(c[0].x, c[2].x);
         // Bottoms: the map picture's, plus the art's border, on the strip's (the panel itself
@@ -444,10 +476,9 @@ internal static partial class ArcadeHud
         }
         _nextList.text = next;
         _nextList.color = Faded(0.6f);
-        string cm = CountermeasureText(aircraft);
-        if (HasCapacitor()) cm += (cm.Length > 0 ? "\n" : "") + $"CAP {100f * aircraft.GetPowerSupply().GetCharge():F0}%";
-        _cmLine.text = cm;
+        _cmLine.text = AppendCapacitorText(CountermeasureText(aircraft), "\n");
         _cmLine.color = Faded(0.9f);
+        ShowCapacitor(_weaponCap);
         RefreshDamageReport();
     }
 
@@ -456,9 +487,9 @@ internal static partial class ArcadeHud
     {
         if (!_minimal || _strip == null) return;
         float extra = BorrowedGauges.Count > 0 && _vector != null ? _vector.sizeDelta.x + 24f : 0f;
-        float width = StripWidth - _stripTrim + extra;
+        float width = (_analog ? AnalogWidth : StripWidth) - _stripTrim + extra;
         _strip.sizeDelta = new Vector2(width, StripHeight);
         // Grow to the right only, keeping the attitude ball at the strip's anchor (screen centre).
-        _strip.pivot = new Vector2((BallCentreX - _stripTrim) / width, 0f);
+        _strip.pivot = new Vector2(((_analog ? AnalogCentreX : BallCentreX) - _stripTrim) / width, 0f);
     }
 }

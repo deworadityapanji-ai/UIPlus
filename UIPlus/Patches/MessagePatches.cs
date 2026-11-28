@@ -5,12 +5,12 @@ using System.Reflection;
 using UIPlus.Helpers;
 using HarmonyLib;
 using NuclearOption.Chat;
+using NuclearOption.Networking;
 
 namespace UIPlus.Patches;
 
-// Every game message (chat, server, mission text, HQ alerts, joins, kills...) ends up in
-// GameplayUI.GameMessage. These patches only *observe*: they note which game method is sending,
-// so the Arcade HUD can show each kind in its own place. The native chat log is unchanged.
+// Chat, system messages and mission text go through GameplayUI.GameMessage. Observe their
+// sources so the custom HUD can route subtitles and banners without changing the native log.
 [HarmonyPatch]
 internal static class MessageSourcePatches
 {
@@ -53,15 +53,35 @@ internal static class KillMessagePatch
         {
             if (!m.Name.StartsWith("UserCode_RpcKillMessage")) continue;
             var p = m.GetParameters();
-            if (p.Length == 3 && p[0].ParameterType == typeof(PersistentID) && p[1].ParameterType == typeof(PersistentID))
+            if (p.Length == 3 && p[0].ParameterType == typeof(PersistentID) && p[1].ParameterType == typeof(PersistentID)
+                && p[2].ParameterType == typeof(KillType))
                 yield return m;
         }
     }
 
     private static bool Prepare() => TargetMethods().Any();
 
-    private static void Prefix(object[] __args) =>
-        ArcadeHud.AddKill((PersistentID)__args[0], (PersistentID)__args[1], Convert.ToInt32(__args[2]));
+    private static void Prefix(PersistentID __0, PersistentID __1, KillType __2) =>
+        ArcadeHud.AddKill(__0, __1, __2);
+}
+
+// Observe the two session messages at their source so faction joins and chat stay separate.
+[HarmonyPatch]
+internal static class PlayerFeedMessagePatch
+{
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        foreach (string name in new[] { nameof(MessageManager.JoinMessage), nameof(MessageManager.DisconnectedMessage) })
+        {
+            MethodInfo method = AccessTools.Method(typeof(MessageManager), name, new[] { typeof(Player) });
+            if (method != null) yield return method;
+        }
+    }
+
+    private static bool Prepare() => TargetMethods().Any();
+
+    private static void Postfix(MethodBase __originalMethod, Player __0) =>
+        ArcadeHud.AddFeedPlayer(__0, __originalMethod.Name == nameof(MessageManager.JoinMessage));
 }
 
 [HarmonyPatch]

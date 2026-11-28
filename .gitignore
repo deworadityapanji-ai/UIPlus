@@ -5,6 +5,13 @@ obj/
 *.pdb
 release/
 
+# Locally supplied release backgrounds
+assets/Backgrounds/*.mp4
+assets/Backgrounds/*.webm
+assets/Backgrounds/*.png
+assets/Backgrounds/*.jpg
+assets/Backgrounds/*.jpeg
+
 # Local tooling and machine-specific settings (your own game path)
 .tools/
 UIPlus/GameDir.local.targets

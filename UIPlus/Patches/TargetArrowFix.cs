@@ -1,4 +1,5 @@
 using HarmonyLib;
+using UIPlus.Helpers;
 using UnityEngine;
 
 namespace UIPlus.Patches;
@@ -15,6 +16,7 @@ internal static class TargetArrowFix
     {
         if (Plugin.FixTargetArrow == null || !Plugin.FixTargetArrow.Value) return true;
         CameraStateManager manager = SceneSingleton<CameraStateManager>.i;
+        if (HudViews.HudViewSuppressed(manager)) return true;
         Camera camera = manager != null ? manager.mainCamera : null;
         if (camera == null) return true;
 

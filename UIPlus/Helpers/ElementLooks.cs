@@ -44,7 +44,7 @@ internal static class ElementLooks
         a.Hidden == b.Hidden && a.Skin == b.Skin && a.Rotation == b.Rotation && UnityEngine.Mathf.Approximately(a.Scale, b.Scale);
 
     private static readonly HudStyle[] Styles =
-        { HudStyle.Native, HudStyle.Arcade, HudStyle.Wingman, HudStyle.Dashboard, HudStyle.Thunder, HudStyles.Plus };
+        { HudStyle.Native, HudStyle.Arcade, HudStyle.Wingman, HudStyle.Dashboard, HudStyle.Thunder, HudStyle.Analog, HudStyles.Plus };
     private static readonly Dictionary<HudStyle, ConfigEntry<string>> Entries = new();
     private static readonly Dictionary<HudStyle, Look[]> Parsed = new();
 
@@ -58,6 +58,7 @@ internal static class ElementLooks
         HudStyle.Wingman => "Wingman",
         HudStyle.Dashboard => "Minimal",
         HudStyle.Thunder => "Thunder",
+        HudStyle.Analog => "Analog",
         HudStyles.Plus => "Plus",
         _ => "",
     };
@@ -108,7 +109,9 @@ internal static class ElementLooks
 
     // ---- skins: other looks an element can take; the first is always the style's own ----
 
-    private static readonly string[] MapSkins = { "Style default", "Game corner art", "Plain box" };
+    private static readonly string[] PanelSkins = { "Panel", "Dials only" };
+    private static readonly string[] AttitudeSkins = { "Outside-in", "Inside-out (Western)" };
+    private static readonly string[] MapSkins = { "Style default", "Game corner art", "Plain box", "Instrument screen" };
     private static readonly string[] BannerSkins = { "Style default", "Panel", "Outline", "Cut-out" };
     private static readonly string[] AlertSkins = { "Style default", "One row", "2x2 grid" };
     private static readonly string[] ReadoutSkins = { "Style default", "Arcade box", "Wingman" };
@@ -119,7 +122,7 @@ internal static class ElementLooks
     /// <summary>The weapon display is Wingman's cluster (which carries its own star) in this style.</summary>
     internal static bool WingmanClusterIn(HudStyle style)
     {
-        if (style == HudStyle.Dashboard || style == HudStyle.Thunder) return false;
+        if (style == HudStyle.Dashboard || style == HudStyle.Thunder || style == HudStyle.Analog) return false;
         int skin = SkinOf(HudElementPositions.WeaponList);
         return skin == 2 || (skin == 0 && style == HudStyle.Wingman);
     }
@@ -131,6 +134,8 @@ internal static class ElementLooks
     /// <summary>The skin names for an element, or null if it has only its style's look.</summary>
     internal static string[] Skins(int id) => id switch
     {
+        HudElementPositions.Strip when HudElementPositions.Style.Value == HudStyle.Analog => PanelSkins,
+        HudElementPositions.AnalogAttitude => AttitudeSkins,
         HudElementPositions.Map => MapSkins,
         HudElementPositions.Banner => BannerSkins,
         HudElementPositions.RwrAlerts => AlertSkins,
@@ -146,6 +151,12 @@ internal static class ElementLooks
 
     internal static string SkinNote(int id, int skin) => (id, skin) switch
     {
+        (HudElementPositions.Strip, 0) => "Grey instrument panel with a frame and corner screws.",
+        (HudElementPositions.Strip, 1) => "Show the instruments on their own.",
+        (HudElementPositions.AnalogAttitude, 0) => "The horizon stays level and moves only with pitch; the aircraft symbol banks with you, as on Russian instruments.",
+        (HudElementPositions.AnalogAttitude, 1) => "As on Western instruments: the aircraft symbol stays level and the horizon tilts the other way when you bank.",
+        (HudElementPositions.Map, 0) when HudElementPositions.Style.Value == HudStyle.Analog => "A black instrument screen in a grey panel frame.",
+        (HudElementPositions.Map, 3) => "A black display with a grey rim and corner screws.",
         (HudElementPositions.Map, 0) => "The game's slanted corner art, or a plain box once moved (Plain map backing setting).",
         (HudElementPositions.Map, 1) => "Always the game's slanted corner art, even when moved.",
         (HudElementPositions.Map, 2) => "Always a plain dark box sized to the map.",

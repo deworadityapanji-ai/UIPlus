@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using BepInEx.Bootstrap;
 using BepInEx.Configuration;
@@ -26,14 +27,21 @@ internal static class HudLayoutEditor
     private static bool _fromManager;
     // Working (unsaved) size / rotation / hidden for each element, like _x and _y.
     private static readonly ElementLooks.Look[] _looks = new ElementLooks.Look[HudElementPositions.Count];
-    private static int _focus = -1;        // the element chosen for size / rotation
+    private static readonly List<int> Selection = new();
+    private static int Focus => Selection.Count == 1 ? Selection[0] : -1;
+    private static bool Control => Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+    private static readonly List<int> Moving = new();
+    private static readonly Vector2[] Origins = new Vector2[HudElementPositions.Count];
+    private static bool _marquee, _moved;
+    private static int _clickOnly;
+    private static Vector2 _pointer;
     private static int _handle;            // 1 = dragging the size corner, 2 = the rotation knob
     private static Vector2 _handleCentre;
     private static float _handleStart, _startScale, _startRotation;
     private static Rect _window = new(16f, 80f, 330f, 600f);
     private static Vector2 _listScroll;
     private static readonly HudStyle[] StyleChoices =
-        { HudStyle.Native, HudStyle.Arcade, HudStyle.Wingman, HudStyle.Dashboard, HudStyle.Thunder };
+        { HudStyle.Native, HudStyle.Arcade, HudStyle.Wingman, HudStyle.Dashboard, HudStyle.Thunder, HudStyle.Analog };
     private static ConfigFile _config;
     private static object _manager;
     private static PropertyInfo _managerWindow;
@@ -50,9 +58,8 @@ internal static class HudLayoutEditor
         "RIGHT INSTRUMENTS", "COMPASS", "DAMAGE (shown when hit)", "WATERLINE",
         "SPEED", "ALTITUDE", "WEAPON LIST", "STATUS TAGS", "GAUGE TRAY", "CAUTION / MISSILE", "PULL UP / STALL", "RWR",
         "SUBTITLE", "MISSION UPDATE", "THROTTLE / FUEL", "INSTRUMENT STRIP",
-        "FACTION / ESCALATION", "DATA BLOCK", "WEAPON RING", "TARGETING SCREEN", "KILL FEED", "RWR ALERTS", "FUEL TAPE", "THROTTLE TAPE", "WEAPON WHEEL", "MISSILE ARCS" };
-    private static float _startX, _startY;
-    private static int _selected;
+        "FACTION / ESCALATION", "DATA BLOCK", "WEAPON RING", "TARGETING SCREEN", "KILL FEED", "RWR ALERTS", "FUEL TAPE", "THROTTLE TAPE", "WEAPON WHEEL", "MISSILE ARCS",
+        "ENGINE", "AIRSPEED", "ATTITUDE", "ALTIMETER", "VERTICAL SPEED", "HEADING", "G METER", "AOA GAUGE", "STORES PLATE" };
     private static Vector2 _dragStart;
     private static TargetingScreenRect _startFrame;
     private static bool _dragging, _resizing;
@@ -113,7 +120,7 @@ internal static class HudLayoutEditor
         _widthPercent = Plugin.TargetingScreenWidthPercent.Value;
         _aspect = TargetingScreenOverlay.LastFeedAspect;
         LoadWorking();
-        _focus = -1;
+        Selection.Clear();
         _config = config;
 
         // Stop mouse clicks from reaching the game menu behind our editor.
@@ -151,7 +158,7 @@ internal static class HudLayoutEditor
         }
         if (!Application.isFocused)
         {
-            _dragging = false;
+            _dragging = _marquee = false;
             _pressedButton = -1;
             return;
         }
@@ -163,81 +170,81 @@ internal static class HudLayoutEditor
         Rect viewport = GetViewport();
         TargetingScreenRect frame = GetFrame(viewport);
         Rect panel = PanelRect(viewport, frame);
+        _pointer = mouse;
         if (UpdateHandles(mouse, viewport)) return;
-        // The floating panel handles its own clicks (IMGUI); nothing behind it reacts.
-        if (Input.GetMouseButtonDown(0) && _window.Contains(mouse)) { _dragging = false; _pressedButton = -1; return; }
         if (Input.GetMouseButtonDown(0))
         {
+            _dragging = _marquee = _moved = false;
+            _clickOnly = -1;
+            _pressedButton = -1;
+            if (_window.Contains(mouse)) return;
             _pressedButton = ButtonAt(mouse);
+            if (_pressedButton >= 0) return;
             bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-            // The selected element keeps winning clicks inside its own box (pick the RWR from the
-            // list, then drag it even where it lies on the map); Shift drags it from anywhere.
-            bool focusValid = _focus > 0 && HudElementPositions.Valid(_focus);
-            bool onFocus = focusValid && ItemRect(_focus, viewport) is Rect own && own.width > 1f && own.Contains(mouse);
-            _selected = focusValid && (shift || onFocus) ? _focus : WidgetAt(mouse, panel, viewport);
-            _dragging = _pressedButton < 0 && _selected >= 0;
-            if (_selected > 0) _focus = _selected;
-            // An element that was never moved follows its leader (RWR alerts the scope, Arcade's
-            // tapes their blocks): start its drag from where the leader has taken it.
-            if (_selected > 0 && HudElementPositions.Leader(_selected) is int leader
-                && Mathf.Abs(_x[_selected]) < 0.01f && Mathf.Abs(_y[_selected]) < 0.01f)
-            {
-                _x[_selected] = _x[leader];
-                _y[_selected] = _y[leader];
-            }
-            if (_dragging)
-            {
-                _resizing = _selected == 0 && GripRect(panel).Contains(mouse);
-                _dragStart = mouse;
-                _startFrame = frame;
-                if (_selected > 0)
-                {
-                    _startX = _x[_selected];
-                    _startY = _y[_selected];
-                }
-            }
-        }
-        if (_dragging && Input.GetMouseButton(0))
-        {
-            Vector2 delta = mouse - _dragStart;
-            float left = _startFrame.Left;
-            float top = _startFrame.Top;
-            if (_selected > 0)
-            {
-                // Offsets are percentages of the whole screen, as the HUD code applies them.
-                _x[_selected] = Mathf.Clamp(_startX + delta.x / Screen.width * 100f, -100f, 100f);
-                _y[_selected] = Mathf.Clamp(_startY + delta.y / Screen.height * 100f, -100f, 100f);
-                // Snap onto the item's default spot when dragged close to it (for the map, that is
-                // the game's own corner with its original backing art).
-                if (HudElementPositions.Valid(_selected))
-                {
-                    float dx = (float)HudElementPositions.Entry(_selected, true).DefaultValue;
-                    float dy = (float)HudElementPositions.Entry(_selected, false).DefaultValue;
-                    if (Mathf.Abs(_x[_selected] - dx) < 1f && Mathf.Abs(_y[_selected] - dy) < 1.5f)
-                    {
-                        _x[_selected] = dx;
-                        _y[_selected] = dy;
-                    }
-                }
-            }
-            else if (_resizing)
-            {
-                // Project onto the panel diagonal to keep its aspect ratio.
-                var diagonal = new Vector2(1f, 1f / _aspect);
-                float sizeDelta = Vector2.Dot(delta, diagonal) / diagonal.sqrMagnitude;
-                _widthPercent = Mathf.Clamp((_startFrame.Width + sizeDelta) / viewport.width * 100f, 10f, 50f);
-            }
+            int hit = WidgetAt(mouse, panel, viewport);
+            if (Control && hit >= 0) { Select(hit, true); return; }
+            // A list-selected element can still be dragged where another element overlaps it.
+            // The strip always yields its interior to its individual instruments.
+            int clicked = hit;
+            if (shift && Selection.Count > 0) hit = Selection[0];
+            else if (Focus > 0 && Focus != HudElementPositions.Strip && Shown(Focus) && ItemRect(Focus, viewport).Contains(mouse))
+                hit = Focus;
+            _dragStart = mouse;
+            if (hit < 0) _marquee = true;
             else
             {
-                left += delta.x;
-                top += delta.y;
+                if (!Selection.Contains(hit)) Select(hit, false);
+                else if (!shift) _clickOnly = clicked;
+                _resizing = Focus == 0 && GripRect(panel).Contains(mouse);
+                _startFrame = frame;
+                CaptureMovement();
+                _dragging = true;
             }
-            TargetingScreenLayout.PositionPercent(viewport.width, viewport.height, _widthPercent,
-                _aspect, left, top, out _xPercent, out _yPercent);
+        }
+        if ((_dragging || _marquee) && (Input.GetMouseButton(0) || Input.GetMouseButtonUp(0)))
+        {
+            Vector2 delta = mouse - _dragStart;
+            if (delta.sqrMagnitude >= 9f) _moved = true;
+            if (_dragging && _moved)
+            {
+                if (_resizing)
+                {
+                    var diagonal = new Vector2(1f, 1f / _aspect);
+                    float change = Vector2.Dot(delta, diagonal) / diagonal.sqrMagnitude;
+                    _widthPercent = Mathf.Clamp((_startFrame.Width + change) / viewport.width * 100f, 10f, 50f);
+                }
+                else
+                {
+                    MoveCaptured(delta.x / Screen.width * 100f, delta.y / Screen.height * 100f);
+                    if (Focus > 0 && HudElementPositions.Valid(Focus))
+                    {
+                        float dx = (float)HudElementPositions.Entry(Focus, true).DefaultValue;
+                        float dy = (float)HudElementPositions.Entry(Focus, false).DefaultValue;
+                        if (Mathf.Abs(_x[Focus] - dx) < 1f && Mathf.Abs(_y[Focus] - dy) < 1.5f) ResetPosition(Focus);
+                    }
+                }
+                if (Selection.Contains(0)) MoveLegacy(viewport, _resizing ? Vector2.zero : delta);
+            }
         }
         if (!Input.GetMouseButtonUp(0)) return;
-
-        _dragging = false;
+        if (_marquee)
+        {
+            if (!_moved || !Control) Selection.Clear();
+            if (_moved)
+            {
+                Rect box = MarqueeRect();
+                for (int id = LegacyTargeting ? 0 : 1; id < HudElementPositions.Count; id++)
+                {
+                    if (id > 0 && (!HudElementPositions.Valid(id) || !Shown(id))) continue;
+                    Rect item = id == 0 ? panel : ItemRect(id, viewport);
+                    if (item.width > 0f && item.xMin <= box.xMax && item.xMax >= box.xMin
+                        && item.yMin <= box.yMax && item.yMax >= box.yMin && !Selection.Contains(id))
+                        Selection.Add(id);
+                }
+            }
+        }
+        else if (_dragging && !_moved && _clickOnly >= 0) Select(_clickOnly, false);
+        _dragging = _marquee = false;
         int pressed = _pressedButton;
         _pressedButton = -1;
         if (pressed < 0 || pressed != ButtonAt(mouse)) return;
@@ -322,21 +329,22 @@ internal static class HudLayoutEditor
             }
             // Every selected element gets the yellow outline; the size and turn handles only
             // where they work.
-            if (_focus > 0 && HudElementPositions.Valid(_focus) && ItemRect(_focus, GetViewport()) is Rect picked && picked.width > 0f
-                && !Focusable(_focus))
-                Outline(picked, "", new Color(1f, 0.85f, 0.3f, 1f));
-            if (Focusable(_focus) && ItemRect(_focus, GetViewport()) is Rect chosen && chosen.width > 0f)
+            Color yellow = new(1f, 0.85f, 0.3f, 1f);
+            foreach (int id in Selection)
             {
-                Outline(chosen, "", new Color(1f, 0.85f, 0.3f, 1f));
+                Rect picked = id == 0 ? panel : ItemRect(id, viewport);
+                if ((id == 0 || Shown(id)) && picked.width > 0f) Outline(picked, "", yellow);
+            }
+            if (_marquee && _moved) Outline(MarqueeRect(), "", yellow);
+            if (Focusable(Focus) && ItemRect(Focus, viewport) is Rect chosen && chosen.width > 0f)
+            {
                 Fill(SizeHandle(chosen), new Color(1f, 0.85f, 0.3f, 1f));
                 Rect knob = TurnHandle(chosen);
                 Fill(new Rect(knob.center.x - 1f, knob.yMax, 2f, chosen.y - knob.yMax), new Color(1f, 0.85f, 0.3f, 0.8f));
                 GUI.Box(knob, "↻");
             }
             var heading = new Rect(Mathf.Max(8f, (Screen.width - 410f) / 2f), 12f, 410f, 48f);
-            GUI.Box(heading, LegacyTargeting
-                ? "Customize HUD Layout\nDrag an item to move it. Select one to size or turn it."
-                : "Customize HUD Layout\nDrag an item to move it. Select one to size or turn it.");
+            GUI.Box(heading, "Customize HUD Layout\nCtrl+click to toggle items. Drag empty space to select a group.");
             GUI.Box(ButtonRect(0), "Apply", GUI.skin.button);
             GUI.Box(ButtonRect(1), "Cancel", GUI.skin.button);
             GUI.Box(ButtonRect(2), "Reset", GUI.skin.button);
@@ -391,16 +399,16 @@ internal static class HudLayoutEditor
 
     private static bool UpdateHandles(Vector2 mouse, Rect viewport)
     {
-        if (!Focusable(_focus)) { _handle = 0; return false; }
-        Rect item = ItemRect(_focus, viewport);
+        if (!Focusable(Focus)) { _handle = 0; return false; }
+        Rect item = ItemRect(Focus, viewport);
         if (item.width <= 0f) { _handle = 0; return false; }
-        if (Input.GetMouseButtonDown(0) && !_window.Contains(mouse))
+        if (Input.GetMouseButtonDown(0) && !Control && !_window.Contains(mouse) && ButtonAt(mouse) < 0)
         {
             _handle = SizeHandle(item).Contains(mouse) ? 1 : TurnHandle(item).Contains(mouse) ? 2 : 0;
             if (_handle == 0) return false;
             _handleCentre = item.center;
-            _startScale = _looks[_focus].Scale;
-            _startRotation = _looks[_focus].Rotation;
+            _startScale = _looks[Focus].Scale;
+            _startRotation = _looks[Focus].Rotation;
             Vector2 from = mouse - _handleCentre;
             _handleStart = _handle == 1 ? Mathf.Max(4f, from.magnitude) : Mathf.Atan2(from.y, from.x) * Mathf.Rad2Deg;
             return true;
@@ -409,21 +417,21 @@ internal static class HudLayoutEditor
         if (!Input.GetMouseButton(0)) { _handle = 0; return true; }
         Vector2 at = mouse - _handleCentre;
         if (_handle == 1)
-            _looks[_focus].Scale = Mathf.Clamp(_startScale * at.magnitude / _handleStart, 0.3f, 3f);
+            _looks[Focus].Scale = Mathf.Clamp(_startScale * at.magnitude / _handleStart, 0.3f, 3f);
         else
         {
             // Screen y points down here, so a clockwise drag is a negative (clockwise) turn.
             float turned = Mathf.DeltaAngle(_handleStart, Mathf.Atan2(at.y, at.x) * Mathf.Rad2Deg);
             float rotation = Mathf.DeltaAngle(0f, _startRotation - turned);
             if (Mathf.Abs(rotation) < 3f) rotation = 0f;   // snaps back to level
-            _looks[_focus].Rotation = Mathf.Round(rotation);
+            _looks[Focus].Rotation = Mathf.Round(rotation);
         }
         return true;
     }
 
     // ---- the floating panel ----
 
-    private static string Label(int id) => id > 0 && id < _labels.Length ? _labels[id] : "";
+    private static string Label(int id) => id == 0 ? "TARGETING SCREEN" : id > 0 && id < _labels.Length ? _labels[id] : "";
 
     private static void DrawWindow(int windowId)
     {
@@ -454,13 +462,17 @@ internal static class HudLayoutEditor
                     string word = extras ? (shown ? "REMOVE" : "ADD") : (shown ? "SHOWN" : "HIDDEN");
                     Color before = GUI.color;
                     if (!shown) GUI.color = new Color(1f, 0.7f, 0.5f);
-                    if (GUILayout.Button(word, GUILayout.Width(72f))) _looks[id].Hidden = shown;
+                    if (GUILayout.Button(word, GUILayout.Width(72f)))
+                    {
+                        if (Selection.Contains(id)) SetHidden(shown);
+                        else _looks[id].Hidden = shown;
+                    }
                     GUI.color = before;
                 }
                 else GUILayout.Label("", GUILayout.Width(72f));
                 Color previous = GUI.color;
-                if (id == _focus) GUI.color = new Color(0.5f, 1f, 0.6f);
-                if (GUILayout.Button(Label(id), GUI.skin.label)) _focus = id;
+                if (Selection.Contains(id)) GUI.color = new Color(0.5f, 1f, 0.6f);
+                if (GUILayout.Button(Label(id), GUI.skin.label)) Select(id, Control);
                 GUI.color = previous;
                 GUILayout.EndHorizontal();
             }
@@ -468,29 +480,41 @@ internal static class HudLayoutEditor
         GUILayout.EndScrollView();
 
         GUILayout.Space(6f);
-        if (_focus > 0 && HudElementPositions.Valid(_focus))
+        if (Selection.Count > 0)
         {
-            GUILayout.Label("Selected: " + Label(_focus));
-            if (HudElementPositions.SupportsLook(_focus))
+            GUILayout.Label(Selection.Count > 1 ? $"{Selection.Count} selected" : "Selected: " + Label(Focus));
+            int editable = Selection.Find(id => id > 0 && HudElementPositions.SupportsLook(id));
+            if (editable > 0)
             {
-                ref ElementLooks.Look look = ref _looks[_focus];
+                ElementLooks.Look look = _looks[editable];
                 GUILayout.Label($"Size  {look.Scale:0.00}x");
-                look.Scale = Mathf.Round(GUILayout.HorizontalSlider(look.Scale, 0.3f, 3f) * 20f) / 20f;
+                float scale = GUILayout.HorizontalSlider(look.Scale, 0.3f, 3f);
                 GUILayout.Label($"Rotation  {look.Rotation:0}°");
-                look.Rotation = Mathf.Round(GUILayout.HorizontalSlider(look.Rotation, -180f, 180f));
+                float rotation = GUILayout.HorizontalSlider(look.Rotation, -180f, 180f);
                 GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Reset size")) look.Scale = 1f;
-                if (GUILayout.Button("Reset rotation")) look.Rotation = 0f;
+                bool resetSize = GUILayout.Button("Reset size");
+                bool resetRotation = GUILayout.Button("Reset rotation");
                 GUILayout.EndHorizontal();
-                if (!DrawSkin(ref look)) GUILayout.Label("No other skins for this one yet.", SmallLabel);
+                foreach (int id in Selection)
+                {
+                    if (id <= 0 || !HudElementPositions.SupportsLook(id)) continue;
+                    if (resetSize || scale != look.Scale) _looks[id].Scale = resetSize ? 1f : Mathf.Round(scale * 20f) / 20f;
+                    if (resetRotation || rotation != look.Rotation) _looks[id].Rotation = resetRotation ? 0f : Mathf.Round(rotation);
+                }
             }
-            else
+            if (Selection.Count > 1)
             {
-                GUILayout.Label("This one can be moved, but not resized or turned yet.", SmallLabel);
-                DrawSkin(ref _looks[_focus]);
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Show")) SetHidden(false);
+                if (GUILayout.Button("Hide")) SetHidden(true);
+                GUILayout.EndHorizontal();
             }
-            if (HudElementPositions.Leader(_focus) is int leads)
-                GUILayout.Label($"Follows {Label(leads)} until you move it; Reset position attaches it again.", SmallLabel);
+            if (Focus > 0)
+            {
+                if (!DrawSkin(ref _looks[Focus]) && editable > 0) GUILayout.Label("No other skins for this one yet.", SmallLabel);
+                if (HudElementPositions.Leader(Focus) is int leads)
+                    GUILayout.Label($"Follows {Label(leads)} until you move it; Reset position attaches it again.", SmallLabel);
+            }
             GUILayout.Space(4f);
             GUILayout.Label("Move (hold the arrows; or hold Shift and drag anywhere)", SmallLabel);
             GUILayout.BeginHorizontal();
@@ -501,12 +525,19 @@ internal static class HudLayoutEditor
             if (GUILayout.RepeatButton("►", GUILayout.Width(40f))) Nudge(step, 0f);
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Reset position")) ResetPosition(_focus);
+            if (GUILayout.Button("Reset position"))
+            {
+                foreach (int id in Selection) ResetPosition(id);
+            }
             if (GUILayout.Button("Reset element"))
             {
                 // Position, size, rotation, skin and shown/hidden back to the style's own.
-                ResetPosition(_focus);
-                _looks[_focus] = ElementLooks.DefaultFor(HudElementPositions.Style.Value, _focus);
+                foreach (int id in Selection)
+                {
+                    ResetPosition(id);
+                    if (id > 0) _looks[id] = ElementLooks.DefaultFor(HudElementPositions.Style.Value, id);
+                    else _widthPercent = (float)Plugin.TargetingScreenWidthPercent.DefaultValue;
+                }
             }
             GUILayout.EndHorizontal();
         }
@@ -517,7 +548,7 @@ internal static class HudLayoutEditor
     // The Skin row (‹ name ›) and its note; false when the element has no other skins.
     private static bool DrawSkin(ref ElementLooks.Look look)
     {
-        string[] skins = ElementLooks.Skins(_focus);
+        string[] skins = ElementLooks.Skins(Focus);
         if (skins == null) return false;
         GUILayout.Space(4f);
         GUILayout.Label("Skin");
@@ -526,27 +557,92 @@ internal static class HudLayoutEditor
         GUILayout.Label(skins[Mathf.Clamp(look.Skin, 0, skins.Length - 1)], CentredLabel);
         if (GUILayout.Button(">", GUILayout.Width(32f))) look.Skin = (look.Skin + 1) % skins.Length;
         GUILayout.EndHorizontal();
-        string note = ElementLooks.SkinNote(_focus, look.Skin);
+        string note = ElementLooks.SkinNote(Focus, look.Skin);
         if (note != null) GUILayout.Label(note, SmallLabel);
         return true;
     }
 
-    // Move the selected element by a step (percent of the screen); a follower detaches first.
+    private static void Select(int id, bool toggle)
+    {
+        if (!toggle) Selection.Clear();
+        else if (Selection.Remove(id)) return;
+        Selection.Add(id);
+    }
+
+    private static Rect MarqueeRect() => Rect.MinMaxRect(Mathf.Min(_dragStart.x, _pointer.x),
+        Mathf.Min(_dragStart.y, _pointer.y), Mathf.Max(_dragStart.x, _pointer.x), Mathf.Max(_dragStart.y, _pointer.y));
+
+    private static void SetHidden(bool hidden)
+    {
+        foreach (int id in Selection)
+            if (id > 0 && (HudElementPositions.SupportsLook(id) || id == HudElementPositions.Waterline))
+                _looks[id].Hidden = hidden;
+    }
+
+    private static void CaptureMovement()
+    {
+        Moving.Clear();
+        foreach (int id in Selection)
+        {
+            if (id == 0 || !HudElementPositions.Valid(id)) continue;
+            // Children already travel with their strip, and attached followers with their leader.
+            if (Selection.Contains(HudElementPositions.Strip) && ArcadeHud.MovesWithStrip(id)) continue;
+            if (Selection.Contains(HudElementPositions.Map) && ArcadeHud.RwrOnMap &&
+                !ArcadeHud.MovesWithStrip(id) && (id == HudElementPositions.Rwr || id == HudElementPositions.RwrAlerts))
+                continue;
+            int from = id;
+            if (HudElementPositions.Leader(id) is int leader && !HudElementPositions.Moved(id))
+            {
+                if (Selection.Contains(leader)) continue;
+                from = leader;
+            }
+            Origins[id] = new Vector2(_x[from], _y[from]);
+            // When the map leaves the dock its offset is measured from the native corner again.
+            if (id == HudElementPositions.Map && ArcadeHud.MapDocked)
+                Origins[id] += new Vector2(100f * ArcadeHud.MapDock.x / Screen.width, -100f * ArcadeHud.MapDock.y / Screen.height);
+            Moving.Add(id);
+        }
+    }
+
+    private static void MoveCaptured(float dx, float dy)
+    {
+        // Stop the whole group when one member reaches the edge of its allowed offset.
+        foreach (int id in Moving)
+        {
+            dx = Mathf.Clamp(dx, -100f - Origins[id].x, 100f - Origins[id].x);
+            dy = Mathf.Clamp(dy, -100f - Origins[id].y, 100f - Origins[id].y);
+        }
+        foreach (int id in Moving)
+        {
+            _x[id] = Origins[id].x + dx;
+            _y[id] = Origins[id].y + dy;
+        }
+    }
+
+    private static void MoveLegacy(Rect viewport, Vector2 pixels) =>
+        TargetingScreenLayout.PositionPercent(viewport.width, viewport.height, _widthPercent, _aspect,
+            _startFrame.Left + pixels.x, _startFrame.Top + pixels.y, out _xPercent, out _yPercent);
+
     private static void Nudge(float dx, float dy)
     {
-        int id = _focus;
-        if (!HudElementPositions.Valid(id)) return;
-        if (HudElementPositions.Leader(id) is int leader && Mathf.Abs(_x[id]) < 0.01f && Mathf.Abs(_y[id]) < 0.01f)
+        CaptureMovement();
+        MoveCaptured(dx, dy);
+        if (Selection.Contains(0))
         {
-            _x[id] = _x[leader];
-            _y[id] = _y[leader];
+            Rect viewport = GetViewport();
+            _startFrame = GetFrame(viewport);
+            MoveLegacy(viewport, new Vector2(dx * Screen.width, dy * Screen.height) / 100f);
         }
-        _x[id] = Mathf.Clamp(_x[id] + dx, -100f, 100f);
-        _y[id] = Mathf.Clamp(_y[id] + dy, -100f, 100f);
     }
 
     private static void ResetPosition(int id)
     {
+        if (id == 0)
+        {
+            _xPercent = (float)Plugin.TargetingScreenXPercent.DefaultValue;
+            _yPercent = (float)Plugin.TargetingScreenYPercent.DefaultValue;
+            return;
+        }
         if (!HudElementPositions.Valid(id)) return;
         _x[id] = (float)HudElementPositions.Entry(id, true).DefaultValue;
         _y[id] = (float)HudElementPositions.Entry(id, false).DefaultValue;
@@ -560,7 +656,7 @@ internal static class HudLayoutEditor
         Apply(_config);
         HudElementPositions.Style.Value = StyleChoices[(at + step + StyleChoices.Length) % StyleChoices.Length];
         LoadWorking();
-        _focus = -1;
+        Selection.Clear();
         _handle = 0;
     }
 
@@ -593,11 +689,13 @@ internal static class HudLayoutEditor
         float bestArea = float.MaxValue;
         for (int id = 1; id < HudElementPositions.Count; id++)
         {
-            if (!Shown(id)) continue;
+            if (!HudElementPositions.Valid(id) || !Shown(id)) continue;
             Rect r = ItemRect(id, viewport);
             float area = r.width * r.height;
             if (area <= 1f || !r.Contains(mouse)) continue;
             int layer = id == HudElementPositions.RwrAlerts ? 3 : id == HudElementPositions.Rwr ? 2 : id == HudElementPositions.Map ? 0 : 1;
+            // A large, rotated dial can have a bigger bounding box than its own panel.
+            if (best == HudElementPositions.Strip && id >= HudElementPositions.AnalogEngine) bestArea = float.MaxValue;
             if (layer > bestLayer || (layer == bestLayer && area < bestArea)) { best = id; bestLayer = layer; bestArea = area; }
         }
         if (best >= 0) return best;
@@ -613,7 +711,7 @@ internal static class HudLayoutEditor
 
     // A custom style shows only the items it actually uses; the placeholders are for Native.
     private static bool Shown(int id) =>
-        LegacyTargeting || HudElementPositions.TryGetScreenRect(id, out _);
+        !_looks[id].Hidden && (LegacyTargeting || HudElementPositions.TryGetScreenRect(id, out _));
 
     private static Rect GripRect(Rect panel)
     {
@@ -656,7 +754,7 @@ internal static class HudLayoutEditor
         _pending = null;
         if (!IsOpen) return;
         _config = null;
-        _dragging = false;
+        _dragging = _marquee = false;
         _pressedButton = -1;
         if (_inputBlocker != null) UnityEngine.Object.Destroy(_inputBlocker);
         _inputBlocker = null;

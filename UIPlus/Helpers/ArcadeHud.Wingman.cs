@@ -31,10 +31,10 @@ internal static partial class ArcadeHud
     private static RectTransform _starMarker, _wheelHidden;
     private static Vector3 _wheelScale;
     private static System.Reflection.FieldInfo _menuObjectField, _menuStateField;
-    // Which weapon station sits under each of the 8 pointers (from the last star refresh), and the
-    // pointer the stick aims at while the wheel is held (-1: none).
-    private static readonly int[] StarStations = { -1, -1, -1, -1, -1, -1, -1, -1 };
+    // Each pointer holds a station index or one of the negative action/empty codes.
+    private static readonly int[] StarStations = new int[WeaponStarLayout.Petals];
     internal static int WheelPetal = -1;
+    private static int _aimedToggle = WeaponStarLayout.Empty;
 
     private static int MenuState(RadialMenuMain menu, out RectTransform wheel)
     {
@@ -77,8 +77,9 @@ internal static partial class ArcadeHud
         _wheelHidden = null;
     }
 
-    private static System.Reflection.FieldInfo _selectedField, _weaponsField, _menuAircraftField, _weaponNumberField, _actionTypeField;
-    private static bool _loggedWheelExtras;
+    private static System.Reflection.FieldInfo _selectedField, _weaponsField, _menuAircraftField;
+    private static readonly System.Reflection.FieldInfo GunsLinked =
+        HarmonyLib.AccessTools.Field(typeof(WeaponManager), "gunsLinked");
 
     /// <summary>
     /// Replaces the game's per-frame weapon-wheel control in Wingman: the stick is snapped to the
@@ -94,25 +95,20 @@ internal static partial class ArcadeHud
             if (!ReferenceEquals(_weaponsField?.GetValue(menu), actions)) return true;
             _selectedField ??= HarmonyLib.AccessTools.Field(typeof(RadialMenuMain), "selectedAction");
             _menuAircraftField ??= HarmonyLib.AccessTools.Field(typeof(RadialMenuMain), "aircraft");
-            _weaponNumberField ??= HarmonyLib.AccessTools.Field(typeof(RadialMenuAction), "weapon_number");
-            _actionTypeField ??= HarmonyLib.AccessTools.Field(typeof(RadialMenuAction), "actionType");
             var aircraft = _menuAircraftField?.GetValue(menu) as Aircraft;
             var input = GameManager.playerInput;
-            if (aircraft == null || input == null || _selectedField == null || _weaponNumberField == null) return true;
-            if (!_loggedWheelExtras)
-            {
-                _loggedWheelExtras = true;
-                var extras = new List<string>();
-                foreach (RadialMenuAction a in actions)
-                    if (a != null && System.Convert.ToInt32(_actionTypeField?.GetValue(a) ?? 9) != 9) extras.Add(a.DisplayName);
-                Plugin.Logger.LogInfo("Wingman weapon wheel: the star replaces the game's wheel. Non-weapon wheel actions not on the star: "
-                    + (extras.Count > 0 ? string.Join(", ", extras) : "none"));
-            }
+            if (aircraft == null || input == null || _selectedField == null) return true;
 
             if (!input.GetButton(button))
             {
                 // Released: fire the game's own action for the aimed weapon (if any), then close.
-                if (_selectedField.GetValue(menu) is RadialMenuAction chosen) chosen.TriggerAction(aircraft);
+                if (WheelPetal >= 0 && _aimedToggle != WeaponStarLayout.Empty)
+                {
+                    // A loadout update can take the aimed action off the star before release.
+                    if (StarStations[WheelPetal] == _aimedToggle)
+                        TriggerStarToggle(aircraft, _aimedToggle);
+                }
+                else if (_selectedField.GetValue(menu) is RadialMenuAction chosen) chosen.TriggerAction(aircraft);
                 menu.CloseMenu();
                 WheelPetal = -1;
                 return false;
@@ -127,12 +123,13 @@ internal static partial class ArcadeHud
                 WheelPetal = petal;
                 RadialMenuAction pick = null;
                 int station = StarStations[petal];
+                _aimedToggle = station < WeaponStarLayout.Empty ? station : WeaponStarLayout.Empty;
                 if (station >= 0 && aircraft.weaponStations != null && station < aircraft.weaponStations.Count)
                 {
                     int number = aircraft.weaponStations[station].Number;
                     foreach (RadialMenuAction a in actions)
-                        if (a != null && System.Convert.ToInt32(_actionTypeField?.GetValue(a) ?? 9) == 9
-                            && _weaponNumberField.GetValue(a) is int n && n == number) { pick = a; break; }
+                        if (a != null && a.GetActionType() == RadialMenuAction.ActionType.SelectWeapon
+                            && a.weapon_number == number) { pick = a; break; }
                 }
                 _selectedField.SetValue(menu, pick);   // an empty pointer selects nothing
             }
@@ -143,6 +140,21 @@ internal static partial class ArcadeHud
         {
             Plugin.Logger.LogWarning("Wingman weapon wheel: falling back to the game's wheel: " + e.Message);
             return true;
+        }
+    }
+
+    private static void TriggerStarToggle(Aircraft aircraft, int action)
+    {
+        WeaponManager manager = aircraft.weaponManager;
+        if (manager == null) return;
+        if (action == WeaponStarLayout.Link)
+        {
+            if (manager.HasMultipleGuns()) manager.ToggleGunsLinked();
+        }
+        else
+        {
+            CombatHUD hud = SceneSingleton<CombatHUD>.i;
+            if (hud != null && hud.aircraft == aircraft && manager.StationsWithTurrets() > 0) hud.ToggleAutoControl();
         }
     }
 
@@ -219,10 +231,11 @@ internal static partial class ArcadeHud
         {
             RectTransform track = Rect("ReloadBar", _reloadParent, new Vector2(0f, 1f), new Vector2(0.5f, 0f),
                 _reloadOrigin + new Vector2(i * step, 0f), new Vector2(width, _reloadBarHeight));
-            Fill(track, Faded(0.18f));
+            // Analog: white bars on the stores plate, like its markings.
+            Fill(track, _analog ? new Color(1f, 1f, 1f, 0.12f) : Faded(0.18f));
             RectTransform fill = Rect("Fill", track, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), Vector2.zero,
                 new Vector2(width, 0f));
-            Fill(fill, Green);
+            Fill(fill, _analog ? Marking : Green);
             ReloadTracks.Add(track);
             ReloadBars.Add(fill);
         }
@@ -271,6 +284,15 @@ internal static partial class ArcadeHud
             SubtitleBase = new Vector2(0f, -110f);   // below the faction bar
             return;
         }
+        if (_analog)
+        {
+            // The instrument panel along the bottom; the silhouette in its own section on it.
+            StatusBase = new Vector2(0f, -350f);
+            DamageBase = new Vector2(1352f, -64f);
+            DamageScale = 0.3f;
+            TraySlot = 100f;
+            return;
+        }
         if (_minimal)
         {
             // Everything else lives in the bottom strip; tags sit just above it.
@@ -306,8 +328,11 @@ internal static partial class ArcadeHud
 
         // One HULL-style gauge under the cluster, the same width: throttle is the thick bar, fuel
         // fills the thin L-shaped line beneath it; values at the right end, Project Wingman style.
-        _bars = Rect("Bars", _root.transform, new Vector2(1f, 0f), new Vector2(1f, 0f), BarsBase, new Vector2(ClusterWidth, 36f));
+        if (_hasPusher) BarsBase.y -= 10f;
+        _bars = Rect("Bars", _root.transform, new Vector2(1f, 0f), new Vector2(1f, 0f), BarsBase,
+            new Vector2(ClusterWidth, _hasPusher ? 46f : 36f));
         BuildHull(_bars);
+        if (_hasPusher) BuildPusherHullStrip(_bars);
 
         // The weapon display in its chosen skin: Wingman's cluster (with the star), or Arcade's list.
         if (WingmanClusterSkin) BuildWingmanCluster(); else BuildArcadeList();
@@ -322,6 +347,8 @@ internal static partial class ArcadeHud
             new Vector2(ClusterWidth, ClusterHeight));
         _flrLine = Text("Flares", _list, 17, TextAlignmentOptions.Right);
         Pin(_flrLine.rectTransform, new Vector2(1f, 1f), new Vector2(300f, 22f), new Vector2(0f, 26f));
+        if (_builtCapacitorBar)
+            _weaponCap = BuildCapacitorBar(_list, new Vector2(0f, 1f), new Vector2(20f, 0f), 220f, 26f, 14f);
         // Weapon text is right-aligned, flush against the divider (x 252).
         _gunLine = Text("Gun", _list, 17, TextAlignmentOptions.Right);
         Pin(_gunLine.rectTransform, new Vector2(0f, 1f), new Vector2(220f, 22f), new Vector2(20f, -40f));
@@ -350,6 +377,9 @@ internal static partial class ArcadeHud
     // The star: 8 diamond petals around a centre, one pointing at each weapon slot, "+N" for more.
     private static void BuildStar(RectTransform parent, Vector2 centre)
     {
+        for (int i = 0; i < StarStations.Length; i++) StarStations[i] = WeaponStarLayout.Empty;
+        WheelPetal = -1;
+        _aimedToggle = WeaponStarLayout.Empty;
         Petals.Clear();
         for (int i = 0; i < 8; i++) Petals.Add(MakePetal(i, parent, centre));
         _starMarker = Rect("StarCentre", parent, new Vector2(0f, 1f), new Vector2(0.5f, 0.5f), centre, Vector2.zero);
@@ -561,49 +591,50 @@ internal static partial class ArcadeHud
         int selReserve = currentIndex >= 0 ? ReloadsCompat.Reserve(currentIndex) : 0;
         _selReserve.text = selReserve > 0 ? $"+{selReserve}" : "";
 
-        RefreshStarSlots(stations, current, currentIndex);
+        RefreshStarSlots(aircraft, stations, current, currentIndex);
 
-        // Countermeasure readiness (and the capacitor, when the aircraft has one).
-        string flr = "";
-        if (CountermeasureInfo(aircraft, out string tag, out bool chargeable, out int ammo, out int reserve))
-        {
-            if (chargeable) flr = $"{tag}  {100f * aircraft.GetPowerSupply().GetCharge():F0}%";
-            else
-            {
-                flr = ammo > 0 ? $"{tag}  READY  {ammo}" : $"{tag}  EMPTY";
-                if (reserve > 0) flr += $" <size=75%><alpha=#B0>+{reserve}</size>";
-            }
-        }
-        if (HasCapacitor()) flr += $"   CAP {100f * aircraft.GetPowerSupply().GetCharge():F0}%";
-        _flrLine.text = flr;
+        _flrLine.text = AppendCapacitorText(CountermeasureText(aircraft, wingmanCount: true), "   ");
+        ShowCapacitor(_weaponCap);
     }
 
     // The star alone (the WEAPON WHEEL element beside an Arcade list).
-    private static void RefreshStarOnly(List<WeaponStation> stations, WeaponStation current)
+    private static void RefreshStarOnly(Aircraft aircraft, List<WeaponStation> stations, WeaponStation current)
     {
         int count = stations != null ? stations.Count : 0;
         Others.Clear();
         for (int i = 0; i < count; i++)
             if (!IsGun(ShortName(stations[i]))) Others.Add(i);
-        RefreshStarSlots(stations, current, current != null && stations != null ? stations.IndexOf(current) : -1);
+        RefreshStarSlots(aircraft, stations, current, current != null && stations != null ? stations.IndexOf(current) : -1);
     }
 
-    private static void RefreshStarSlots(List<WeaponStation> stations, WeaponStation current, int currentIndex)
+    private static void RefreshStarSlots(Aircraft aircraft, List<WeaponStation> stations, WeaponStation current, int currentIndex)
     {
         // Star: up to 8 other weapons clockwise from the top, in the game's cycle order. With more,
         // the window keeps the selected one in view and "+N" counts the rest.
         int n = Others.Count;
-        int start = 0;
-        if (n > 8)
-        {
-            int sel = Others.IndexOf(currentIndex);
-            start = sel >= 0 ? ((sel - 3) % n + n) % n : 0;
-        }
+        WeaponManager manager = aircraft.weaponManager;
+        WeaponStarLayout.Assign(Others, currentIndex, manager?.HasMultipleGuns() == true,
+            manager?.StationsWithTurrets() > 0, StarStations);
+        CombatHUD hud = SceneSingleton<CombatHUD>.i;
         for (int s = 0; s < Slots.Count; s++)
         {
             StarSlot slot = Slots[s];
-            bool used = s < n;
+            int station = StarStations[s];
+            bool used = station != WeaponStarLayout.Empty;
+            bool selected = station >= 0 && stations[station] == current;
+            Petals[s].color = selected ? Faded(0.95f) : used ? Faded(0.32f) : Faded(0.12f);
             if (!slot.Rect.gameObject.activeSelf) slot.Rect.gameObject.SetActive(true);
+            if (station == WeaponStarLayout.Link || station == WeaponStarLayout.Auto)
+            {
+                bool link = station == WeaponStarLayout.Link;
+                bool on = link ? GunsLinked?.GetValue(manager) is true : hud != null && hud.aircraft == aircraft && hud.turretAutoControl;
+                slot.Name.text = link ? "LINK" : "AUTO";
+                slot.Count.text = on ? "ON" : "OFF";
+                slot.Name.color = Faded(0.62f);
+                slot.Count.color = on ? Green : Faded(0.35f);
+                foreach (Image edge in slot.Frame) if (edge != null) edge.color = Color.clear;
+                continue;
+            }
             if (!used)
             {
                 // No weapon in this position: a dim placeholder keeps the star complete.
@@ -613,9 +644,7 @@ internal static partial class ArcadeHud
                 foreach (Image edge in slot.Frame) if (edge != null) edge.color = Color.clear;
                 continue;
             }
-            int index = Others[(start + s) % n];
-            WeaponStation st = stations[index];
-            bool selected = st == current;
+            WeaponStation st = stations[station];
             bool empty = st.GetAmmoLoaded() <= 0 && st.Ammo <= 0;
             float alpha = selected ? 1f : 0.62f;
             Color c = empty ? new Color(0.55f, 0.55f, 0.55f, alpha) : Faded(alpha);
@@ -623,13 +652,6 @@ internal static partial class ArcadeHud
             slot.Count.text = st.GetAmmoReadout();
             slot.Name.color = slot.Count.color = c;
             foreach (Image edge in slot.Frame) if (edge != null) edge.color = selected ? Green : Color.clear;
-        }
-        for (int p = 0; p < Petals.Count; p++)
-        {
-            bool used = p < n;
-            StarStations[p] = used ? Others[(start + p) % n] : -1;
-            bool selected = used && stations[Others[(start + p) % n]] == current;
-            Petals[p].color = selected ? Faded(0.95f) : used ? Faded(0.32f) : Faded(0.12f);
         }
         _overflow.text = n > 8 ? $"+{n - 8}" : "";
         _overflow.color = Faded(0.7f);

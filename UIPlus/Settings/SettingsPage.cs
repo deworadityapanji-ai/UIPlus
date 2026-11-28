@@ -1,9 +1,12 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using BepInEx.Configuration;
 using TMPro;
 using UIPlus.Helpers;
+using UIPlus.Menu;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -33,12 +36,17 @@ internal sealed class SettingsPage : MonoBehaviour
         ("Chase HUD", "FlightHud", "Chase view"),
         (HudViews.Section, "ShowInCockpit", "Cockpit view"),
         (HudViews.Section, "ShowInOrbit", "Orbit camera"),
+        (HudViews.Section, "ShowInHudView", "Show in HUD view (requires ArcadeCam)"),
         (null, null, "HUD ELEMENTS"),
         ("HUD Layout", "TextContrast", "Text contrast (dark halo)"),
         ("HUD Layout", "MissileArcsInPvp", "Allow missile arcs in PvP"),
         ("HUD Layout", "KillCallouts", "Hit / miss / destroyed callouts"),
         ("HUD Layout", "KillFeed", "Kill feed"),
+        ("HUD Layout", "KillFeedIntercepts", "Show intercepted munitions"),
+        ("HUD Layout", "KillFeedPlayers", "Show players joining/leaving"),
         ("HUD Layout", "WeaponPopup", "Weapon pop-up"),
+        ("HUD Layout", "HoverDriftIndicator", "Hover drift indicator"),
+        ("HUD Layout", "CapacitorDisplay", "Capacitor display"),
         ("Targeting Screen", "TargetingScreenEnabled", "Targeting screen"),
         ("Minimap", "Zoom", "Minimap zoom"),
         ("HUD Layout", "PlainBackingWhenMoved", "Plain map backing when moved"),
@@ -52,7 +60,7 @@ internal sealed class SettingsPage : MonoBehaviour
         ("HUD Layout", "ArcadeWeaponIconRotation", "Arcade: weapon icon rotation"),
         ("HUD Layout", "WingmanTargetingScreen", "Wingman: targeting screen"),
         ("HUD Layout", "WingmanSlant", "Wingman: lean the side panels"),
-        ("HUD Layout", "DashboardDockMap", "Dashboard: dock the map to the strip"),
+        ("HUD Layout", "DashboardDockMap", "Dashboard / Analog: dock the map to the panel"),
         ("HUD Layout", "ThunderFactionColours", "Thunder: faction colours"),
         ("HUD Layout", "ThunderFactionPalette#Boscali", "Thunder: Boscali colour"),
         ("HUD Layout", "ThunderFactionPalette#Primeva", "Thunder: Primeva colour"),
@@ -64,9 +72,26 @@ internal sealed class SettingsPage : MonoBehaviour
         ("Chase HUD", "LeftInstruments", "Left instruments"),
         ("Chase HUD", "RightInstruments", "Right instruments"),
         ("Chase HUD", "Compass", "Compass"),
+        (null, null, "MAIN MENU"),
+        (MenuSettings.Section, "MenuStyle", "Menu style"),
+        (MenuSettings.Section, "MenuTips", "Tips"),
+        (MenuSettings.Section, "MenuNews", "Version and links"),
+        (MenuSettings.Section, "MenuLogo", "Logo"),
+        (MenuSettings.Section, "MenuAccent", "Accent colour"),
+        (MenuSettings.Section, "CustomBackground", "Custom background"),
+        (MenuSettings.Section, "BackgroundImageSeconds", "Image duration"),
+        (MenuSettings.Section, "BackgroundTransition", "Background transition"),
+        (MenuSettings.Section, "BackgroundFadeSeconds", "Fade duration"),
+        (MenuSettings.Section, "BackgroundVideoAudio", "Video sound"),
+        (MenuSettings.Section, "BackgroundVideoAudioOutput", "Video audio output"),
     };
 
     private Transform _content, _parts;
+    private TMP_Text _backgroundStatus;
+    private Task<(string[] Files, string Error)> _backgroundScan;
+    private string[] _backgroundFiles;
+    private int _lastRejected;
+    private volatile bool _refreshBackgroundStatus;
 
     // ---- template (built once, from a copy of the game's Gameplay page) ----
 
@@ -154,8 +179,21 @@ internal sealed class SettingsPage : MonoBehaviour
         ScrollRect scroll = GetComponentInChildren<ScrollRect>(true);
         _content = scroll != null ? scroll.content : null;
         if (_parts == null || _content == null) return;
-        try { Build(); }
+        try { Build(scroll); }
         catch (Exception e) { Plugin.Logger.LogWarning($"Settings tab: could not fill the page: {e}"); }
+    }
+
+    private void OnEnable()
+    {
+        MenuSettings.CustomBackground.SettingChanged += BackgroundSettingChanged;
+        RefreshBackgroundStatus();
+    }
+
+    private void OnDisable()
+    {
+        MenuSettings.CustomBackground.SettingChanged -= BackgroundSettingChanged;
+        _backgroundScan = null;
+        _backgroundFiles = null;
     }
 
     private GameObject Part(string name) => _parts.Find(name)?.gameObject;
@@ -169,8 +207,9 @@ internal sealed class SettingsPage : MonoBehaviour
     private bool _panelWide;        // spans both columns
     private float _panelY;          // where its next row starts, from its top
 
-    private void Build()
+    private void Build(ScrollRect scroll)
     {
+        using var timing = new UiTiming("settings page build");
         ConfigFile config = Plugin.Instance.Config;
         _columnY[0] = _columnY[1] = Margin;
         // The two main controls first, in a box across the top, larger.
@@ -178,6 +217,9 @@ internal sealed class SettingsPage : MonoBehaviour
         if (config.TryGetEntry(new ConfigDefinition("HUD Layout", "HudStyle"), out ConfigEntry<HudStyle> style))
             AddDropdown("HUD style", style, big: true);
         AddButton("HUD layout", "OPEN EDITOR", OpenEditor, big: true);
+
+        AddPanel(null, wide: true);
+        AddHudColour();
 
         foreach (var (section, key, label) in Layout)
         {
@@ -198,6 +240,10 @@ internal sealed class SettingsPage : MonoBehaviour
             else if (entry.SettingType == typeof(float) && entry.Description?.AcceptableValues is AcceptableValueRange<float> range)
                 AddSlider(label, entry, range.MinValue, range.MaxValue);
         }
+        AddBackgroundFolder();
+        AddButton("Title video by At0micVen0m_", "YouTube channel",
+            () => Application.OpenURL("https://www.youtube.com/@At0micVen0m_"));
+
         // Mod compatibility: one row per integration. Greyed out when that mod is not installed;
         // otherwise its switch, with whether it is working (hooked in).
         AddPanel("MOD COMPATIBILITY", wide: true);
@@ -211,14 +257,13 @@ internal sealed class SettingsPage : MonoBehaviour
         content.pivot = new Vector2(0.5f, 1f);
         content.anchoredPosition = Vector2.zero;
         content.sizeDelta = new Vector2(0f, Mathf.Max(_columnY[0], _columnY[1]) + Margin - Gap);
-        ScrollRect scroll = GetComponentInChildren<ScrollRect>(true);
         if (scroll != null)
         {
             // Standard orientation for top-pinned content: wheel up goes up, bar starts at the top.
             scroll.scrollSensitivity = Mathf.Abs(scroll.scrollSensitivity);
             if (scroll.verticalScrollbar != null) scroll.verticalScrollbar.direction = Scrollbar.Direction.BottomToTop;
-            Canvas.ForceUpdateCanvases();
-            scroll.verticalNormalizedPosition = 1f;
+            // The content is already pinned to the top. Let ScrollRect update the scrollbar
+            // in its normal layout pass instead of rebuilding every canvas here.
         }
     }
 
@@ -227,6 +272,110 @@ internal sealed class SettingsPage : MonoBehaviour
         HudLayoutEditor.RequestOpen();
         // Close the settings so the HUD (and the editor over it) is visible.
         GetComponentInParent<SettingsMenu>()?.CloseSettingsMenu();
+    }
+
+    private void AddHudColour()
+    {
+        SettingsMenu menu = GetComponentInParent<SettingsMenu>();
+        SettingsMenuButton tab = SettingsTab.FindAccessibility(menu);
+        Button button = AddButton("HUD colour", "ACCESSIBILITY", () => menu.OpenMenu(tab));
+        button.gameObject.SetActive(tab != null);
+
+        AddNote("The HUD colour is the primary colour in the game's Accessibility settings; UI Plus follows it.");
+    }
+
+    private TMP_Text AddNote(string message, bool wrap = false, bool small = false)
+    {
+        GameObject note = Instantiate(Part(LabelPart), _panel);
+        TMP_Text text = note.GetComponent<TMP_Text>();
+        text.text = message;
+        text.alignment = TextAlignmentOptions.MidlineLeft;
+        text.enableWordWrapping = wrap;
+        text.enableAutoSizing = true;
+        text.fontSizeMax = small ? text.fontSize * 0.85f : text.fontSize;
+        text.fontSizeMin = Mathf.Max(10f, text.fontSizeMax * 0.7f);
+        text.raycastTarget = false;
+        TopStretch((RectTransform)note.transform, _panelY, RowHeight, Inset, Inset);
+        note.SetActive(true);
+        _panelY += RowHeight + RowGap;
+        return text;
+    }
+
+    private void AddBackgroundFolder()
+    {
+        AddButton("Background folder", "Open folder", OpenBackgroundFolder);
+        AddNote($"Custom backgrounds: put images (.png .jpg) or videos (.mp4 .webm) in {BackgroundFiles.RelativeDirectory}",
+            wrap: true, small: true);
+        _backgroundStatus = AddNote("", wrap: true, small: true);
+        RefreshBackgroundStatus();
+    }
+
+    private void OpenBackgroundFolder()
+    {
+        try
+        {
+            string folder = Path.GetFullPath(BackgroundFiles.EnsureDirectory());
+            using var explorer = System.Diagnostics.Process.Start("explorer.exe", $"\"{folder}\"");
+            RefreshBackgroundStatus();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            Plugin.Logger.LogWarning($"Could not open the custom background folder: {error.Message}");
+            _backgroundStatus.text = "Could not open the folder — see the log";
+        }
+    }
+
+    private void BackgroundSettingChanged(object sender, EventArgs args) => _refreshBackgroundStatus = true;
+
+    private void RefreshBackgroundStatus()
+    {
+        _refreshBackgroundStatus = false;
+        if (_backgroundStatus == null || !isActiveAndEnabled) return;
+        _backgroundScan = null;
+        _backgroundFiles = null;
+        if (!MenuSettings.CustomBackground.Value)
+        {
+            _backgroundStatus.text = BackgroundPlayback.FolderStatus(false, 0, 0, 0);
+            return;
+        }
+
+        _backgroundStatus.text = "Checking the background folder…";
+        _backgroundScan = Task.Run(() =>
+        {
+            try { return (BackgroundFiles.FindFiles(), (string)null); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                return ((string[])null, error.Message);
+            }
+        });
+    }
+
+    private void Update()
+    {
+        if (_refreshBackgroundStatus) RefreshBackgroundStatus();
+        if (_backgroundScan?.IsCompleted == true)
+        {
+            var (files, error) = _backgroundScan.GetAwaiter().GetResult();
+            _backgroundScan = null;
+            if (error != null)
+            {
+                Plugin.Logger.LogWarning($"Could not scan the custom background folder: {error}");
+                _backgroundStatus.text = "Could not read the folder — see the log";
+                return;
+            }
+            _backgroundFiles = files;
+            _lastRejected = -1;
+        }
+        if (_backgroundFiles == null || _lastRejected == TitleBackground.RejectedFileCount) return;
+        _lastRejected = TitleBackground.RejectedFileCount;
+        int images = 0, videos = 0, rejected = 0;
+        foreach (string path in _backgroundFiles)
+        {
+            if (BackgroundPlayback.Kind(path) == BackgroundKind.Image) images++;
+            else videos++;
+            if (TitleBackground.WasRejected(path)) rejected++;
+        }
+        _backgroundStatus.text = BackgroundPlayback.FolderStatus(true, images, videos, rejected);
     }
 
     // Pin a rect to its parent's top edge, stretched across with the given side insets.
@@ -424,6 +573,8 @@ internal sealed class SettingsPage : MonoBehaviour
 
     private void AddSlider(string label, ConfigEntryBase entry, float min, float max)
     {
+        bool imageSeconds = entry == MenuSettings.BackgroundImageSeconds;
+        bool fadeSeconds = entry == MenuSettings.BackgroundFadeSeconds;
         GameObject row = Row(label, SliderPart, false, out GameObject control, out Vector2 size);
         Slider slider = control.GetComponent<Slider>();
         // The value readout: a text inside the slider if the game's has one, else our own to its left.
@@ -449,13 +600,13 @@ internal sealed class SettingsPage : MonoBehaviour
         slider.SetValueWithoutNotify((float)entry.BoxedValue);
         Action<float> show = v =>
         {
-            string shown = v.ToString("0") + "\u00B0";
+            string shown = fadeSeconds ? $"{v:0.0} s" : imageSeconds ? $"{v:0} s" : v.ToString("0") + "\u00B0";
             if (value != null) value.text = shown; else legacyValue.text = shown;
         };
         show((float)entry.BoxedValue);
         slider.onValueChanged.AddListener(v =>
         {
-            v = Mathf.Round(v);
+            v = fadeSeconds ? Mathf.Round(v * 10f) / 10f : Mathf.Round(v);
             entry.BoxedValue = v;
             show(v);
         });
@@ -472,14 +623,23 @@ internal sealed class SettingsPage : MonoBehaviour
             : Enum.GetValues(entry.SettingType).Cast<object>().ToArray();
         dropdown.onValueChanged = new Dropdown.DropdownEvent();
         dropdown.ClearOptions();
-        dropdown.AddOptions(values.Select(v => Pretty(v.ToString())).ToList());
+        dropdown.AddOptions(values.Select(v => v switch
+        {
+            CapacitorDisplay.Text => "Text (CAP %)",
+            CapacitorDisplay.Bar => "Bar with kJ",
+            MenuAccent.HudColour => "HUD colour",
+            MenuStyle.SideRail => "Side rail",
+            MenuStyle.MinimalCorner => "Minimal corner",
+            MenuStyle.BottomBar => "Bottom bar",
+            _ => Pretty(v.ToString()),
+        }).ToList());
         dropdown.SetValueWithoutNotify(Math.Max(0, Array.IndexOf(values, entry.BoxedValue)));
         dropdown.RefreshShownValue();
         dropdown.onValueChanged.AddListener(i => { if (i >= 0 && i < values.Length) entry.BoxedValue = values[i]; });
     }
 
     // A button made from a dropdown: same frame and caption, no list.
-    private void AddButton(string label, string caption, Action onClick, bool big = false)
+    private Button AddButton(string label, string caption, Action onClick, bool big = false)
     {
         Row(label, DropdownPart, big, out GameObject control, out _);
         Dropdown dropdown = control.GetComponent<Dropdown>();
@@ -501,6 +661,7 @@ internal sealed class SettingsPage : MonoBehaviour
         button.colors = colours;
         button.spriteState = sprites;
         button.onClick.AddListener(() => onClick());
+        return button;
     }
 
     // "WingmanOnly" → "Wingman only".

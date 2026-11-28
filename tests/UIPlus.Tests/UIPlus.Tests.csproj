@@ -8,6 +8,13 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../UIPlus/Helpers/HudAttachment.cs" Link="HudAttachment.cs" />
+    <Compile Include="../../UIPlus/Helpers/HudViewPolicy.cs" Link="HudViewPolicy.cs" />
+    <Compile Include="../../UIPlus/Helpers/CapacitorReadout.cs" Link="CapacitorReadout.cs" />
+    <Compile Include="../../UIPlus/Helpers/KillFeedFilter.cs" Link="KillFeedFilter.cs" />
+    <Compile Include="../../UIPlus/Helpers/PusherThrottle.cs" Link="PusherThrottle.cs" />
+    <Compile Include="../../UIPlus/Helpers/WeaponStarLayout.cs" Link="WeaponStarLayout.cs" />
+    <Compile Include="../../UIPlus/Menu/MenuLayout.cs" Link="MenuLayout.cs" />
+    <Compile Include="../../UIPlus/Menu/Backgrounds/BackgroundPlayback.cs" Link="BackgroundPlayback.cs" />
     <Compile Include="../../UIPlus/Helpers/HudLayoutMath.cs" Link="HudLayoutMath.cs" />
     <Compile Include="../../UIPlus/Helpers/HudCanvasMath.cs" Link="HudCanvasMath.cs" />
     <Compile Include="../../UIPlus/Helpers/HudLayoutStamp.cs" Link="HudLayoutStamp.cs" />

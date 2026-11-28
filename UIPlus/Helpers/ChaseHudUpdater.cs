@@ -1,4 +1,5 @@
 using UnityEngine;
+using UIPlus.Patches;
 
 namespace UIPlus.Helpers;
 
@@ -12,26 +13,30 @@ internal sealed class ChaseHudUpdater : MonoBehaviour
     {
         YappinatorCompat.TryInitialize();
         CameraStateManager cam = SceneSingleton<CameraStateManager>.i;
-        if (cam != null && cam.currentState == cam.chaseState
-            && Plugin.FlightHud.Value && !DynamicMap.mapMaximized)
-            HudElements.AttachToCamera(cam);
+        bool attach = Plugin.IsActive && HudViews.CameraAttached(cam) && !DynamicMap.mapMaximized;
+        bool hudView = attach && HudViews.IsHudView(cam);
+        ChaseHud.UpdateHudViewOverrides(hudView);
+        if (attach)
+            HudElements.AttachToCamera(cam, hudView);
         else
             HudElements.RestoreAttachments();
         HudElementPositions.Tick(cam);
         // Before the custom HUD, which centres the minimap using the zoomed scale.
-        MinimapZoom.Tick();
+        bool stockHud = HudViews.HudViewSuppressed(cam);
+        MinimapZoom.Tick(stockHud);
         ArcadeHud.Tick(cam);
         RwrCompat.Tick(HudViews.Showing(cam) && !DynamicMap.mapMaximized, ArcadeHud.RwrOnMap, ArcadeHud.HudColour);
         // The custom styles show speed, altitude and heading themselves.
         HudElements.FadeHelmet(ArcadeHud.NativeInstrumentsHidden && !DynamicMap.mapMaximized);
         HudDiagnostics.Tick();
         TargetingScreenOverlay.Tick(cam);
-        MissileIndicatorsCompat.Tick(HudElementPositions.Style.Value, Plugin.MatchMissileIndicators.Value);
-        HudHide.Apply();   // last: everything else has had its say this frame
+        MissileIndicatorsCompat.Tick(HudElementPositions.Style.Value, !stockHud && Plugin.MatchMissileIndicators.Value);
+        HudHide.Apply(stockHud);   // last: everything else has had its say this frame
     }
 
     private void OnDestroy()
     {
+        ChaseHud.UpdateHudViewOverrides(false);
         HudElementPositions.Restore();
         ArcadeHud.Dispose();
         NoAutopilotCompat.SetHidden(false);

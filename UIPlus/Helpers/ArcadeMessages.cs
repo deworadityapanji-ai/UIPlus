@@ -470,7 +470,8 @@ internal static partial class ArcadeHud
             UpdateCallout();
             return;
         }
-        HideNativeLog(true);
+        // Plus keeps the game's event feed even when its optional subtitles are enabled.
+        HideNativeLog(!_plus);
         UpdateSubtitle();
         UpdateBanner();
         UpdateCallout();

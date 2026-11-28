@@ -41,6 +41,7 @@ internal static class SettingsTab
 
     private static void AddTab(SettingsMenu menu)
     {
+        using var timing = new UiTiming("settings tab build");
         var first = DefaultMenu?.GetValue(menu) as SettingsMenuButton
             ?? throw new InvalidOperationException("the settings menu has no default tab");
         Transform bar = first.transform.parent;
@@ -58,6 +59,16 @@ internal static class SettingsTab
     // Match the game's tab lettering (its tabs are all capitals).
     private static string Caption(string like) =>
         !string.IsNullOrEmpty(like) && like == like.ToUpperInvariant() ? "UI PLUS" : "UI Plus";
+
+    internal static SettingsMenuButton FindAccessibility(SettingsMenu menu)
+    {
+        if (menu == null || DefaultMenu?.GetValue(menu) is not SettingsMenuButton first || first == null)
+            return null;
+        Transform bar = first.transform.parent;
+        return bar == null ? null : bar.GetComponentsInChildren<SettingsMenuButton>(true)
+            .FirstOrDefault(tab => tab.MenuPrefab != null &&
+                tab.MenuPrefab.GetComponentInChildren<AccessibilityMenu>(true) != null);
+    }
 
     // The Gameplay page: it has toggle, slider and dropdown rows to copy.
     private static GameObject SourcePage(Transform bar)

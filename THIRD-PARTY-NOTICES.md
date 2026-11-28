@@ -1,5 +1,7 @@
 # Third-party notices
 
+The bundled [Nuclear Option title video](https://www.youtube.com/watch?v=tATPDavr1fo) by [At0micVen0m_ (Atomic)](https://www.youtube.com/@At0micVen0m_) is used with permission and is outside the mod's licence.
+
 This repository contains code adapted from the projects below. Their notices are reproduced here as
 required by their licenses.
 

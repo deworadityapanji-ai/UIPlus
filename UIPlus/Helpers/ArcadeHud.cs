@@ -10,13 +10,13 @@ using UnityEngine.UI;
 namespace UIPlus.Helpers;
 
 // Dashboard was called Minimal; saved configs saying "Minimal" are carried over on load.
-public enum HudStyle { Native, Arcade, Wingman, Dashboard, Thunder }
+public enum HudStyle { Native, Arcade, Wingman, Dashboard, Thunder, Analog }
 
 // Plus (the game's own HUD with additions) is kept in the code but left out of the style list
 // until it is ready; its value follows the listed ones. A saved "Plus" loads as Native.
 internal static class HudStyles
 {
-    internal const HudStyle Plus = (HudStyle)5;
+    internal const HudStyle Plus = (HudStyle)50;
 }
 
 // "Arcade" chase HUD: a flat, Ace Combat style layout drawn on our own canvas. It reads the same
@@ -41,6 +41,7 @@ internal static partial class ArcadeHud
     private static float DamageScale = 0.5f;
     private const float ListWidth = 250f, RowHeight = 26f;
     private const float GaugeHeight = 200f, GaugeGap = 18f;
+    private const float TapeFillOffset = 5f, TapeFillWidth = 4f;
     private const float IconLong = 112f, IconShort = 52f, IconGap = 92f;
     private static float TraySlot = 150f;   // largest width or height of one gauge in the tray
 
@@ -54,7 +55,7 @@ internal static partial class ArcadeHud
     private static GameObject _root;
     private static RectTransform _speed, _alt, _list, _damage;
     private static TextMeshProUGUI _speedValue, _speedExtra, _altValue, _altExtra;
-    private static TextMeshProUGUI _divider, _flare, _cap;
+    private static TextMeshProUGUI _divider, _flare;
     private static Gauge _fuel, _throttle;
     private static Image _iconLeft, _iconRight, _iconLeftFill, _iconRightFill;
     // Extra HUD gauges (by component type name, comma separated) to move into the Arcade gauge tray.
@@ -105,12 +106,14 @@ internal static partial class ArcadeHud
         {
             // Includes weapon view and "Hide UI", when the game switches its own HUD canvas off.
             if (_root != null) _root.SetActive(false);
+            _capSupply = null;
             MapDock = Vector2.zero;
             HideNativeRange(false);
             PlaceWeaponWheel(false);
             SyncNeutralQolFuel(false);
             HideNativeWeaponPanel(false);
             HideExtras(false);
+            PusherStockHud.Restore();
             ReturnVectorGauges();
             ReleaseSilhouette();
             ReleaseDamageVisible();
@@ -119,12 +122,15 @@ internal static partial class ArcadeHud
         }
         var aircraft = (Aircraft)cam.followingUnit;
         if (_root == null || _aircraft != aircraft || _builtStyle != HudElementPositions.Style.Value
+            || (!_plus && _hasPusher != PusherAircraft.HasPusher(aircraft))
+            || (!_plus && _builtCapacitorBar != WantCapacitorBar)
             || (_wingman && _builtSlant != (WingmanSlant != null && WingmanSlant.Value))
             || (!_plus && _builtBannerSkin != ElementLooks.SkinOf(BannerItem))
             || ((_wingman || _builtStyle == HudStyle.Arcade)
                 && (_builtSpeedSkin != ElementLooks.SkinOf(SpeedBlock) || _builtAltSkin != ElementLooks.SkinOf(AltBlock)))
             || (!_plus && (_builtFeedSkin != ElementLooks.SkinOf(KillFeedItem) || _builtDamageSkin != ElementLooks.SkinOf(HudElementPositions.Damage)))
             || (_minimal && _builtRwrAway != RwrAway)
+            || (_analog && (_builtRwrActive != RwrCompat.Active || _builtPanelSkin != ElementLooks.SkinOf(StripItem)))
             || (Plugin.TextContrast != null && _builtContrast != Plugin.TextContrast.Value)
             || (!_plus && !_minimal && !_thunder && _builtListSkin != ElementLooks.SkinOf(WeaponList))
             || (!_plus && _builtStarWheel != (!_wingCluster && !ElementLooks.Get(WeaponWheelItem).Hidden && ElementLooks.SkinOf(WeaponWheelItem) == 1)))
@@ -132,6 +138,8 @@ internal static partial class ArcadeHud
         if (_root == null) return;
         _root.SetActive(true);
         _root.GetComponent<Canvas>().sortingOrder = flightCanvas.sortingOrder;
+        if (_plus) PusherStockHud.Restore();
+        else PusherStockHud.Sync(aircraft, _hasPusher, hud.GetHUDCenter(), flightCanvas, cam.mainCamera);
         if (_plus) { MapDock = Vector2.zero; HideNativeRange(false); PlaceWeaponWheel(false); TickPlus(aircraft); return; }
         SyncNeutralQolFuel(_thunder);
         HideNativeWeaponPanel(true);
@@ -147,14 +155,17 @@ internal static partial class ArcadeHud
         // Arcade and Wingman lay the RWR over the map, so it is centred on the aircraft there.
         // NuclearMinimap centres the map on the aircraft itself (and owns its orientation).
         if (!_minimal) { if (!HudElementPositions.NuclearMinimapPresent) CentreMinimap(aircraft); MapDock = Vector2.zero; }
-        else { UpdateBall(aircraft); DockMap(); }
+        else { if (_analog) UpdateAnalog(aircraft); else UpdateBall(aircraft); }
+        SampleCapacitor(aircraft);
         Refresh(aircraft);
+        UpdatePusher(aircraft);
         UpdateIcons(aircraft);
         UpdateWarnings(aircraft);
         UpdateMissileArcs(aircraft);
         UpdateMessages();
         UpdateWeaponPopup(aircraft);
         ApplyOffsets();
+        if (_minimal) DockMap();
         UpdateTargetFrame(aircraft);
         UpdateRangeScale(aircraft);
         HideNativeRange(true);
@@ -173,7 +184,7 @@ internal static partial class ArcadeHud
     // The HUD's main colour as the active theme styles it ("HUD_TextMainColor" in the theme's HUD
     // section, e.g. white in a custom theme). The readouts' own text colour can stay at the default
     // green while the theme decides what is drawn, so the theme is the truth.
-    private static bool GameHudColour(out Color colour)
+    internal static bool GameHudColour(out Color colour)
     {
         colour = default;
         var theme = ThemeManager.Active != null ? ThemeManager.Active.HudTheme : null;
@@ -195,6 +206,7 @@ internal static partial class ArcadeHud
     {
         HideNativeWeaponPanel(false);
         HideExtras(false);
+        PusherStockHud.Restore();
         ReturnVectorGauges();
         ReleaseSilhouette();
         ReleaseDamageVisible();
@@ -206,6 +218,7 @@ internal static partial class ArcadeHud
         _root = null;
         Rows.Clear();
         _aircraft = null;
+        _capSupply = null;
         foreach (Sprite s in Cutouts.Values) if (s != null) { Object.Destroy(s.texture); Object.Destroy(s); }
         Cutouts.Clear();
     }
@@ -253,9 +266,16 @@ internal static partial class ArcadeHud
 
         _builtStyle = HudElementPositions.Style.Value;
         _wingman = _builtStyle == HudStyle.Wingman;
-        _minimal = _builtStyle == HudStyle.Dashboard;
+        // Analog shares Dashboard's strip (RWR slot, docked map, tray), with dials for a layout.
+        _analog = _builtStyle == HudStyle.Analog;
+        _minimal = _builtStyle == HudStyle.Dashboard || _analog;
         _thunder = _builtStyle == HudStyle.Thunder;
         _plus = _builtStyle == HudStyles.Plus;
+        _hasPusher = PusherAircraft.HasPusher(aircraft);
+        _pusherFill = _pusherNeedle = null;
+        _pusherInk = null;
+        _pusherReverse = _pusherIdle = null;
+        _builtCapacitorBar = !_plus && WantCapacitorBar;
         _ring = null;
         _starMarker = null;
         _tgtPanel = null;
@@ -263,6 +283,8 @@ internal static partial class ArcadeHud
         _rangeScale = null;
         _wingDivider = null;
         _dataBlock = _topBar = null;
+        _weaponCap = _dataCap = null;
+        _capLine = null;
         _damageReport = null;
         _speed = _alt = _list = _strip = _rwrSlot = _horizon = null;
         _fuelTape = _throttleTape = null;
@@ -290,7 +312,6 @@ internal static partial class ArcadeHud
             BuildMessages();
             BuildCallout();
             BuildWeaponPopup();
-            BuildKillFeed();
             return;
         }
         if (_wingman)
@@ -299,7 +320,7 @@ internal static partial class ArcadeHud
         }
         else if (_minimal)
         {
-            BuildMinimalLayout();
+            if (_analog) BuildAnalogLayout(hud, aircraft); else BuildMinimalLayout();
         }
         else if (_thunder)
         {
@@ -346,6 +367,8 @@ internal static partial class ArcadeHud
         _throttleTape = Tape(false, "THR", AltBase, out Gauge throttleTape, out _throttleTapeBase);
         if (_fuel == null) _fuel = fuelTape; else ExtraFuel.Add(fuelTape);
         if (_throttle == null) _throttle = throttleTape; else ExtraThrottle.Add(throttleTape);
+        if (_hasPusher && _builtStyle == HudStyle.Arcade)
+            BuildPusherTape((RectTransform)throttleTape.Fill.parent);
 
         // The damage silhouette (a copy of the game's). Arcade: bottom right, with the selected
         // weapon on both sides. Wingman: small in the top-right corner, icons by the counter.
@@ -385,8 +408,12 @@ internal static partial class ArcadeHud
         // Weapon range: on Wingman's divider (to its right, on the line), on Arcade's throttle tape
         // (the aircraft side, beyond the tape's own ticks).
         if (_wingDivider != null) BuildRangeScale(_wingDivider, 160f, 1f, 3f, 0f);
-        else if (!_minimal && !_thunder && !_wingman && _throttle != null && _throttle.Fill != null)
-            BuildRangeScale(_throttle.Fill.parent as RectTransform, GaugeHeight, -1f, -16f, -13f);
+        else if (_builtStyle == HudStyle.Arcade)
+        {
+            float clearance = _hasPusher ? TapeFillWidth : 0f;
+            BuildRangeScale((RectTransform)throttleTape.Fill.parent, GaugeHeight, -1f, -16f - clearance,
+                -13f - clearance, targetFill: true);
+        }
 
         // The game's own nozzle / wing-sweep / tilt gauges, moved into the Arcade layout.
         // Minimal keeps the tray inside its strip, at the right end; elsewhere it floats on its own.
@@ -1097,7 +1124,8 @@ internal static partial class ArcadeHud
             new Vector2(ListWidth, RowHeight));
         _divider = ListLine("Divider");
         _flare = ListLine("Flares");
-        _cap = ListLine("Capacitor");
+        if (_builtCapacitorBar) _weaponCap = BuildCapacitorBar(_list, Vector2.one, Vector2.zero, 190f, RowHeight, 14f);
+        else _capLine = ListLine("Capacitor");
     }
 
     // A readout block: spaced label, outlined value box, two small detail lines, and a slim vertical
@@ -1199,7 +1227,7 @@ internal static partial class ArcadeHud
         }
         // Fill runs up the text side of the spine.
         RectTransform fill = Rect("Fill", g, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-            new Vector2(-side * 5f, 0f), new Vector2(4f, 0f));
+            new Vector2(-side * TapeFillOffset, 0f), new Vector2(TapeFillWidth, 0f));
         Image fillImage = fill.gameObject.AddComponent<Image>();
         fillImage.raycastTarget = false;
         // Level marker across the spine at the current value.
@@ -1591,10 +1619,11 @@ internal static partial class ArcadeHud
         int count = stations != null ? stations.Count : 0;
         WeaponStation current = aircraft.weaponManager != null ? aircraft.weaponManager.currentWeaponStation : null;
         if (_wingCluster) RefreshStar(aircraft, stations, current);
+        else if (_analog) RefreshAnalog(aircraft, stations, current);
         else if (_minimal) RefreshMinimal(aircraft, stations, current);
         else if (_thunder) RefreshThunder(aircraft, stations, current);
         else RefreshList(aircraft, stations, count, current);
-        if (_starWheel != null) RefreshStarOnly(stations, current);
+        if (_starWheel != null) RefreshStarOnly(aircraft, stations, current);
         // Thunder's data block and match bar, when added to another style as extras.
         if (!_thunder && !_plus)
         {
@@ -1639,10 +1668,17 @@ internal static partial class ArcadeHud
         _flare.rectTransform.anchoredPosition = new Vector2(0f, -y);
         _flare.text = flares;
         if (flares.Length > 0) y += RowHeight;
-        bool cap = HasCapacitor();
-        _cap.rectTransform.anchoredPosition = new Vector2(0f, -y);
-        _cap.text = cap ? $"CAP   {100f * aircraft.GetPowerSupply().GetCharge():F0}%" : "";
-        if (cap) y += RowHeight;
+        if (ShowCapacitor(_weaponCap))
+        {
+            _weaponCap.Rect.anchoredPosition = new Vector2(0f, -y);
+            y += RowHeight;
+        }
+        if (_capLine != null)
+        {
+            _capLine.rectTransform.anchoredPosition = new Vector2(0f, -y);
+            _capLine.text = _capListText;
+            if (_capListText.Length > 0) y += RowHeight;
+        }
         _list.sizeDelta = new Vector2(ListWidth, y);
     }
 
@@ -1687,22 +1723,26 @@ internal static partial class ArcadeHud
         gauge.Percent.color = color;
     }
 
-    /// <summary>
-    /// The selected countermeasure, any type (including ones added by aircraft mods): a short tag
-    /// (FLR, CHF, JAM, or its own name), and either its charge (chargeable ones, from the
-    /// capacitor) or its ammo count.
-    /// </summary>
-    private static bool CountermeasureInfo(Aircraft aircraft, out string tag, out bool chargeable, out int ammo, out int reserve)
+    // The capacitor bar carries the energy reading, leaving the countermeasure line for its state.
+    private static string CountermeasureText(Aircraft aircraft, bool wingmanCount = false)
     {
-        tag = ""; chargeable = false; ammo = 0; reserve = 0;
         Countermeasure active = aircraft.countermeasureManager != null
             ? aircraft.countermeasureManager.GetActiveCountermeasure() : null;
-        if (active == null) return false;
-        tag = active is FlareEjector ? "FLR" : active is ChaffEjector ? "CHF" : active is RadarJammer ? "JAM" : ShortCmName(active.displayName);
-        chargeable = active.chargeable || active is RadarJammer;
-        ammo = active is FlareEjector flare ? flare.GetAmmo() : active.ammo;
-        reserve = chargeable ? 0 : ReloadsCompat.CountermeasureReserve(active);
-        return true;
+        if (active == null) return "";
+        string tag = active is FlareEjector ? "FLR" : active is ChaffEjector ? "CHF" : active is RadarJammer ? "JAM" : ShortCmName(active.displayName);
+        if (active.chargeable || active is RadarJammer)
+        {
+            PowerSupply supply = aircraft.GetPowerSupply();
+            string state = aircraft.countermeasureTrigger ? "ACTIVE" :
+                supply != null && supply.GetChargeKJ() <= 0f ? "EMPTY" : "READY";
+            return $"{tag}   {state}";
+        }
+        int ammo = active is FlareEjector flare ? flare.GetAmmo() : active.ammo;
+        int reserve = ReloadsCompat.CountermeasureReserve(active);
+        string count = wingmanCount
+            ? (ammo > 0 ? $"{tag}  READY  {ammo}" : $"{tag}  EMPTY")
+            : $"{tag}   {ammo}";
+        return count + (reserve > 0 ? $" <size=75%><alpha=#B0>+{reserve}</size>" : "");
     }
 
     // A custom countermeasure's display name, shortened to fit where "FLR" goes.
@@ -1713,13 +1753,6 @@ internal static partial class ArcadeHud
         if (name.Length <= 10) return name;
         string first = name.Split(' ')[0];   // "DECOY DRONE LAUNCHER" -> "DECOY"
         return first.Length >= 3 && first.Length <= 10 ? first : name.Substring(0, 10);
-    }
-
-    private static string CountermeasureText(Aircraft aircraft)
-    {
-        if (!CountermeasureInfo(aircraft, out string tag, out bool chargeable, out int ammo, out int reserve)) return "";
-        if (chargeable) return $"{tag}   {100f * aircraft.GetPowerSupply().GetCharge():F0}%";
-        return $"{tag}   {ammo}" + (reserve > 0 ? $" <size=75%><alpha=#B0>+{reserve}</size>" : "");
     }
 
     // The native capacitor bar exists only on aircraft that use stored energy.
@@ -1743,12 +1776,20 @@ internal static partial class ArcadeHud
         Offset(_throttleTape, ThrottleTapeItem, _throttleTapeBase, unit);
         Offset(_list, WeaponList, ListBase, unit);
         Offset(_status, StatusRow, StatusBase, unit);
-        if (!_minimal) { Offset(_vector, VectorGauges, VectorBase, unit); KeepTrayOnScreen(); }
+        Offset(_strip, StripItem, StripBase, unit);
+        Offset(_vector, VectorGauges, _minimal ? new Vector2(-14f, 0f) : VectorBase, unit);
+        if (!_minimal) KeepTrayOnScreen();
         if (_caution != null) Offset(_caution.Rect, Caution, CautionBase, unit);
         if (_pullUp != null) Offset(_pullUp.Rect, PullUp, PullUpBase, unit);
         Offset(_damage, HudElementPositions.Damage, DamageBase - new Vector2(_minimal ? _stripTrim : 0f, 0f), unit);
         Offset(_bars, BarsItem, BarsBase, unit);
-        Offset(_strip, StripItem, StripBase, unit);
+        if (_analog)
+        {
+            for (int id = HudElementPositions.AnalogEngine; id < AnalogItems.Length; id++)
+                Offset(AnalogItems[id], id, AnalogBases[id], unit);
+            if (_rwrBezel != null && _strip.lossyScale.x != 0f)
+                _rwrBezel.position = _rwrSlot.position + (Vector3)HudElementPositions.PixelOffset(HudElementPositions.Rwr);
+        }
         Offset(_dataBlock, DataBlockItem, DataBlockBase, unit);
         Offset(_topBar, TopBarItem, TopBarBase, unit);
         Offset(_ring, RingItem, RingBase, unit);
@@ -1788,6 +1829,9 @@ internal static partial class ArcadeHud
     {
         if (rect == null) return;
         Vector2 px = HudElementPositions.PixelOffset(id) * unit;
+        // Child offsets are screen distances even when the panel is scaled or turned.
+        if (_minimal && rect.parent == _strip && _strip.lossyScale.x != 0f)
+            px = _strip.InverseTransformVector(HudElementPositions.PixelOffset(id));
         if (!LookBase.TryGetValue(rect, out var built))
             LookBase[rect] = built = (rect.localScale, rect.localRotation);
         float k = ElementLooks.ScaleFactor(id);
@@ -1810,6 +1854,7 @@ internal static partial class ArcadeHud
             : id == PullUp && _pullUp != null && _pullUp.Rect.gameObject.activeSelf ? _pullUp.Rect
             : id == HudElementPositions.Damage ? _damage
             : id == BarsItem ? _bars
+            : _analog && id >= HudElementPositions.AnalogEngine ? AnalogItems[id]
             : id == StripItem ? _strip
             : id == DataBlockItem ? _dataBlock
             : id == TopBarItem ? _topBar
@@ -1823,7 +1868,7 @@ internal static partial class ArcadeHud
             : id == SubtitleItem && _subtitleGroup != null && _subtitleGroup.alpha > 0.01f ? _subtitle
             : id == BannerItem && _bannerGroup != null && _bannerGroup.alpha > 0.01f ? _banner
             : null;
-        if (target == null || _root == null || !_root.activeInHierarchy) return false;
+        if (target == null || _root == null || !target.gameObject.activeInHierarchy) return false;
         var corners = new Vector3[4];
         target.GetWorldCorners(corners);
         rect = HudElementPositions.ToGui(corners);
@@ -1839,8 +1884,9 @@ internal static partial class ArcadeHud
     private static Transform NativePanel()
     {
         CombatHUD combat = SceneSingleton<CombatHUD>.i;
+        _topRightPanel ??= AccessTools.Field(typeof(CombatHUD), "topRightPanel");
         var panel = combat != null
-            ? AccessTools.Field(typeof(CombatHUD), "topRightPanel")?.GetValue(combat) as GameObject : null;
+            ? _topRightPanel?.GetValue(combat) as GameObject : null;
         return panel != null ? panel.transform : null;
     }
 

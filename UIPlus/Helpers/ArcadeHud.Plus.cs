@@ -112,7 +112,6 @@ internal static partial class ArcadeHud
         else ReleaseDamageVisible();
         UpdateMessages();
         UpdateWeaponPopup(aircraft);
-        UpdateKillFeed();
         ApplyOffsets();
     }
 
