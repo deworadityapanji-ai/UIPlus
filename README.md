@@ -90,7 +90,10 @@ UI Plus needs none of these, but it works with each of them when installed. The 
 
 | Mod | What UI Plus does with it |
 |---|---|
-| **ArcadeCam** | HIT / MISS / DESTROYED callouts; the targeting screen hides during ArcadeCam's weapon camera |
+| **ArcadeCam** | HIT / MISS / DESTROYED callouts; the targeting screen hides during ArcadeCam's weapon camera; the UI Plus HUD shows in ArcadeCam's HUD view |
+| **MissionSaveState** | Its Continue and Load Save buttons fit into the custom main menu styles, at the top of PLAY. The buttons and the saving itself come from MissionSaveState |
+| **Join LAN Button** | Its LAN buttons appear in the custom main menu styles |
+| **RAH-72 Pushout (KnockPush)** | The pusher prop it adds shows as each style's PROP readout, like the Ibis |
 | **KaceyTronic RWR** | The scope and its alerts follow the HUD style, and both can be moved in the editor |
 | **Ace Combat Style Reloads** | Weapon reserves and reload progress on the HUD |
 | **NO Missile Indicators** | Its style follows the HUD style (Project Wingman's 3D indicator in Wingman, arrows elsewhere), and its arrows step aside where the missile arcs show |
